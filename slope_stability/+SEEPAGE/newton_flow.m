@@ -56,11 +56,6 @@ it_damp_max = 10;
 q2 = Bw * coord(2,:)';
 wc2 = repmat(wc, dim, 1);
 
-% Pre-restrict operators to free DOFs (done once, avoids full n_n assembly).
-Bw_Q   = Bw(:, Q_w);          % (dim*n_int x n_Qw)
-C_Q    = C(:, Q_w);           % (n_int     x n_Qw)
-K_D_QQ = K_D(Q_w, Q_w);       % (n_Qw x n_Qw)
-
 while true
     it = it + 1;
 
@@ -82,20 +77,20 @@ while true
     %  Assemble constitutive matrix E  (dim*n_int x n_int)
     % ------------------------------------------------------------------
     vE = repmat(conduct0 .* perm_r_der .* weight, dim, 1) .* ...
-        reshape(grho * q2, dim, n_int);
+        reshape(Bw * (grho * coord(2,:)'), dim, n_int);
     iE = reshape(1:dim*n_int, dim, n_int);
     jE = repmat(1:n_int, dim, 1);
     E  = sparse(iE, jE, vE);
 
     % ------------------------------------------------------------------
-    %  Tangent matrix K_QQ and right-hand side f_Q (restricted to free DOFs)
+    %  Tangent matrix K and right-hand side f
     % ------------------------------------------------------------------
-    K_QQ = K_D_QQ + Bw_Q' * E * C_Q;
+    K = K_D + Bw' * E * C;
 
     kappa = repmat(perm_r, dim, 1);
     q1 = Bw * pw';
     q3 = q1 + grho * kappa(:) .* q2;
-    f_Q = -Bw_Q' * (wc2(:) .* q3);
+    f  = -Bw' * (wc2(:) .* q3);
 
     % ------------------------------------------------------------------
     %  Solve for Newton increment
@@ -103,6 +98,9 @@ while true
     dp = zeros(1, n_n);
 
     if use_iterative
+        K_QQ = K(Q_w, Q_w);
+        rhs  = f(Q_w);
+
         % IJV for HYPRE.  The sparsity pattern can change (E depends on
         % the active zone), so we re-do setup_preconditioner_ijv each time.
         [K_I, K_J, K_V] = find(K_QQ);
@@ -112,17 +110,16 @@ while true
         else
             linear_system_solver.setup_preconditioner_ijv(K_I, K_J, K_V, n_Qw);
         end
-        K_QQ_rsb = sparsersb(K_QQ);   % fast matvec for GMRES
-        linear_system_solver.A_orthogonalize(K_QQ_rsb);
-        dp(Q_w) = linear_system_solver.solve(K_QQ_rsb, f_Q);
+        linear_system_solver.A_orthogonalize(K_QQ);
+        dp(Q_w) = linear_system_solver.solve(K_QQ, rhs);
     else
-        dp(Q_w) = K_QQ \ f_Q;
+        dp(Q_w) = K(Q_w, Q_w) \ f(Q_w);
     end
 
     % ------------------------------------------------------------------
     %  Damping (bisection on residual norm, analogous to damping_ALG5)
     % ------------------------------------------------------------------
-    criterion = norm(f_Q);
+    criterion = norm(f(Q_w));
     alpha     = 1;
     it_damp   = 0;
 
@@ -140,9 +137,9 @@ while true
 
         kappa_a = repmat(perm_r_a, dim, 1);
         q3_a    = Bw * pw_alpha' + grho * kappa_a(:) .* q2;
-        f_a_Q   = -Bw_Q' * (wc2(:) .* q3_a);
+        f_a     = -Bw' * (wc2(:) .* q3_a);
 
-        if norm(f_a_Q) < criterion
+        if norm(f_a(Q_w)) < criterion
             break;
         end
         alpha = alpha / 2;

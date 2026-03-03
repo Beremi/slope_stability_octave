@@ -33,13 +33,16 @@ D=sparse(iD,jD,vD);
 K_D = Bw'*D*Bw;
 
 % the right-hand side vector
+% wc3=[wc; wc; wc];
+% q1=Bw*pw_D';
+% f=-Bw'*(wc3(:).*q1);
+
 wc2=repmat(wc,dim,1);
 q1=Bw*pw_D'; q2=Bw*coord(2,:)';
 q3=q1+grho*q2;
 f=-Bw'*(wc2(:).*q3);
 
 % initialization of the pressure field
-n_Qw = sum(Q_w);
 pw_0=zeros(1,n_n);
 if isempty(linear_system_solver)
     pw_0(Q_w)=K_D(Q_w,Q_w)\f(Q_w);
@@ -47,8 +50,8 @@ else
     % Use iterative solver for the initial linear Darcy solve.
     K_QQ = K_D(Q_w,Q_w);
     [Ki, Kj, Kv] = find(K_QQ);
-    linear_system_solver.setup_preconditioner_ijv(Ki, Kj, Kv, n_Qw);
-    pw_0(Q_w)=linear_system_solver.solve(sparsersb(K_QQ), f(Q_w));
+    linear_system_solver.setup_preconditioner_ijv(Ki, Kj, Kv, sum(Q_w));
+    pw_0(Q_w)=linear_system_solver.solve(K_QQ, f(Q_w));
 end
 pw_init=pw_0+pw_D;
 
