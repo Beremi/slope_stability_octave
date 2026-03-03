@@ -1,70 +1,178 @@
-function pw=newton_flow(pw_init,conduct0,Q_w,weight,B,C,K_D,wc,...
-                   elem,coord,HatP,WF,eps_int,grho,it_max,tol)
+function pw = newton_flow(pw_init, conduct0, Q_w, weight, Bw, C, K_D, wc, ...
+    elem, coord, HatP, WF, eps_int, grho, it_max, tol, linear_system_solver)
+%--------------------------------------------------------------------------
+% newton_flow applies a damped Newton method to the nonlinear unconfined
+% seepage problem.
+%
+% When a DFGMRES / HYPRE solver object is supplied the tangent system is
+% solved iteratively (with IJV pattern-reuse, deflation, and damping
+% analogous to NEWTON.newton).  Otherwise the classical backslash (\) path
+% is used as a fallback.
+%
+% INPUT ARGUMENTS:
+%   pw_init    - Initial pressure field (1 x n_n).
+%   conduct0   - Hydraulic conductivity at integration points (1 x n_int).
+%   Q_w        - Logical free-DOF mask for pressure (1 x n_n).
+%   weight     - Quadrature weights at integration points.
+%   Bw         - Gradient operator (dim*n_int x n_n).
+%   C          - Function-value operator (n_int x n_n).
+%   K_D        - Darcy stiffness matrix (n_n x n_n, sparse).
+%   wc         - weight .* conduct0 product (1 x n_int).
+%   elem       - Element connectivity.
+%   coord      - Nodal coordinates (dim x n_n).
+%   HatP       - Basis function values at quadrature points.
+%   WF         - Quadrature weights for volume integration.
+%   eps_int    - Penalty parameters at integration points.
+%   grho       - Specific weight of water.
+%   it_max     - Maximum number of Newton iterations.
+%   tol        - Relative tolerance for convergence.
+%   linear_system_solver - (optional) DFGMRES handle or [].
+%                          If empty / missing, the direct solver (\) is used.
+%
+% OUTPUT:
+%   pw         - Converged pressure field (1 x n_n).
+%--------------------------------------------------------------------------
 
-% Newton solver for unconfined seepage problem
+use_iterative = (nargin >= 17) && ~isempty(linear_system_solver);
 
-% number of nodes, elements and integration points + print
-  n_n=size(coord,2);            % number of nodes
-  dim = size(coord, 1);         % Spatial dimension (2D or 3D).
-  n_e=size(elem,2);             % number of elements
-  n_q=length(WF);               % number of quadratic points
-  n_int = n_e*n_q ;             % total number of integrations points 
-  n_p=size(elem,1);             % number of nodes within one element
-  
-% initialization  
-  pw=pw_init;
-  it=0;
-  
-% iterations   
-  while true
-      
-    it=it+1;
-    % relative permeability and its derivative
-    pw_e=reshape(pw(elem(:)),n_p,n_e);
-    pw_int=sum(repmat(HatP,1,n_e).*kron(pw_e,ones(1,n_q)));
-    perm_r=ones(1,n_int);
-    perm_r_der=zeros(1,n_int);
-    part1=(pw_int<eps_int)&(pw_int>0);
-    part2=(pw_int<=0);
-    perm_r(part1)=pw_int(part1)./eps_int(part1);
-    perm_r(part2)=0;    
-    perm_r_der(part1)=1./eps_int(part1);
-       
-    % assembling of the constitutive matrix E, size(E)=(dim*n_int, n_int)
-    vE=repmat(conduct0.*perm_r_der.*weight,dim,1).*reshape(B*(grho*coord(2,:)'),dim,n_int); % size(vE)=(dim, n_int) 
-    iE=reshape(1:dim*n_int,dim,n_int);
-    jE=repmat(1:n_int,dim,1);
-    E=sparse(iE,jE,vE); 
-    
-    % assembling of the stiffness matrix K
-    K=K_D+B'*E*C;
-    
-    % assembling of the right-hand side vector
-    kappa=repmat(perm_r,dim,1);
-    wc2=repmat(wc,dim,1);
-    q1=B*pw'; q2=B*coord(2,:)';
-    q3=q1+grho*kappa(:).*q2;
-    f=-B'*(wc2(:).*q3);
-     
-    % Newton's increment and next iteration
-    dp=zeros(1,n_n);
-    dp(Q_w)=K(Q_w,Q_w)\f(Q_w);
-    pw=pw+dp;
-    
-    % stopping criteria
-    crit=norm(dp)/norm(pw_init);
-    if crit<tol
-        fprintf(    'Newton solver converges: number of iteration=%d ',it); 
-        fprintf(    'stopping criterion=%e ',crit);
-        fprintf('\n'); 
-        break
+% Dimensions.
+n_n   = size(coord, 2);
+dim   = size(coord, 1);
+n_e   = size(elem, 2);
+n_q   = length(WF);
+n_int = n_e * n_q;
+n_p   = size(elem, 1);
+n_Qw  = sum(Q_w);
+
+% Initialisation.
+pw = pw_init;
+it = 0;
+first_ijv_setup = true;
+
+% Damping parameters (same style as NEWTON.newton).
+it_damp_max = 10;
+
+% Pre-compute gravity gradient (constant across iterations).
+q2 = Bw * coord(2,:)';
+wc2 = repmat(wc, dim, 1);
+
+while true
+    it = it + 1;
+
+    % ------------------------------------------------------------------
+    %  Evaluate relative permeability and its derivative
+    % ------------------------------------------------------------------
+    pw_e   = reshape(pw(elem(:)), n_p, n_e);
+    pw_int = sum(repmat(HatP, 1, n_e) .* kron(pw_e, ones(1, n_q)));
+
+    perm_r     = ones(1, n_int);
+    perm_r_der = zeros(1, n_int);
+    part1 = (pw_int < eps_int) & (pw_int > 0);
+    part2 = (pw_int <= 0);
+    perm_r(part1)     = pw_int(part1) ./ eps_int(part1);
+    perm_r(part2)     = 0;
+    perm_r_der(part1) = 1 ./ eps_int(part1);
+
+    % ------------------------------------------------------------------
+    %  Assemble constitutive matrix E  (dim*n_int x n_int)
+    % ------------------------------------------------------------------
+    vE = repmat(conduct0 .* perm_r_der .* weight, dim, 1) .* ...
+         reshape(Bw * (grho * coord(2,:)'), dim, n_int);
+    iE = reshape(1:dim*n_int, dim, n_int);
+    jE = repmat(1:n_int, dim, 1);
+    E  = sparse(iE, jE, vE);
+
+    % ------------------------------------------------------------------
+    %  Tangent matrix K and right-hand side f
+    % ------------------------------------------------------------------
+    K = K_D + Bw' * E * C;
+
+    kappa = repmat(perm_r, dim, 1);
+    q1 = Bw * pw';
+    q3 = q1 + grho * kappa(:) .* q2;
+    f  = -Bw' * (wc2(:) .* q3);
+
+    % ------------------------------------------------------------------
+    %  Solve for Newton increment
+    % ------------------------------------------------------------------
+    dp = zeros(1, n_n);
+
+    if use_iterative
+        K_QQ = K(Q_w, Q_w);
+        rhs  = f(Q_w);
+
+        % IJV for HYPRE.  The sparsity pattern can change (E depends on
+        % the active zone), so we re-do setup_preconditioner_ijv each time.
+        [K_I, K_J, K_V] = find(K_QQ);
+        if first_ijv_setup
+            linear_system_solver.setup_preconditioner_ijv(K_I, K_J, K_V, n_Qw);
+            first_ijv_setup = false;
+        else
+            linear_system_solver.setup_preconditioner_ijv(K_I, K_J, K_V, n_Qw);
+        end
+        linear_system_solver.A_orthogonalize(K_QQ);
+        dp(Q_w) = linear_system_solver.solve(K_QQ, rhs);
+    else
+        dp(Q_w) = K(Q_w, Q_w) \ f(Q_w);
     end
-    if it>it_max
-        warning('Newton solver does not converge.')
-        fprintf(    'stopping criterion=%e ',crit);
-        fprintf('\n'); 
-        break
+
+    % ------------------------------------------------------------------
+    %  Damping (bisection on residual norm, analogous to damping_ALG5)
+    % ------------------------------------------------------------------
+    criterion = norm(f(Q_w));
+    alpha     = 1;
+    it_damp   = 0;
+
+    while it_damp < it_damp_max
+        it_damp  = it_damp + 1;
+        pw_alpha = pw + alpha * dp;
+
+        % Residual at trial point.
+        pw_e_a   = reshape(pw_alpha(elem(:)), n_p, n_e);
+        pw_int_a = sum(repmat(HatP, 1, n_e) .* kron(pw_e_a, ones(1, n_q)));
+        perm_r_a = ones(1, n_int);
+        pa1 = (pw_int_a < eps_int) & (pw_int_a > 0);
+        perm_r_a(pa1) = pw_int_a(pa1) ./ eps_int(pa1);
+        perm_r_a(pw_int_a <= 0) = 0;
+
+        kappa_a = repmat(perm_r_a, dim, 1);
+        q3_a    = Bw * pw_alpha' + grho * kappa_a(:) .* q2;
+        f_a     = -Bw' * (wc2(:) .* q3_a);
+
+        if norm(f_a(Q_w)) < criterion
+            break;
+        end
+        alpha = alpha / 2;
     end
-  end
-    
+    if it_damp >= it_damp_max
+        alpha = 0;
+    end
+
+    % ------------------------------------------------------------------
+    %  Update
+    % ------------------------------------------------------------------
+    pw = pw + alpha * dp;
+
+    % Expand deflation basis on accepted steps.
+    if use_iterative && (alpha > 0)
+        linear_system_solver.expand_deflation_basis(dp(Q_w)');
+    end
+
+    % ------------------------------------------------------------------
+    %  Stopping criteria
+    % ------------------------------------------------------------------
+    crit = norm(dp) / norm(pw_init);
+    fprintf('  seepage newton it=%d  resid=%.2e  alpha=%.2f\n', it, crit, alpha);
+
+    if crit < tol
+        fprintf('Seepage Newton converges: iteration = %d, stopping criterion = %e\n', it, crit);
+        break;
+    end
+    if it > it_max
+        warning('Seepage Newton does not converge.');
+        fprintf('  stopping criterion = %e\n', crit);
+        break;
+    end
+end
+
 end

@@ -1,6 +1,7 @@
 function [pw, grad_p, mater_sat]=seepage_problem_3D...
-           (coord,elem,Q_w,pw_D,grho,conduct0,HatP,DHatP1,DHatP2,DHatP3,WF)
+           (coord,elem,Q_w,pw_D,grho,conduct0,HatP,DHatP1,DHatP2,DHatP3,WF,linear_system_solver)
 
+  if nargin < 12; linear_system_solver = []; end
   
   % number of nodes, elements, etc.
   n_e=size(elem,2);           % number of elements
@@ -43,14 +44,22 @@ function [pw, grad_p, mater_sat]=seepage_problem_3D...
   
   % initialization of the pressure field
   pw_0=zeros(1,n_n);
-  pw_0(Q_w)=K_D(Q_w,Q_w)\f(Q_w);
+  if isempty(linear_system_solver)
+      pw_0(Q_w)=K_D(Q_w,Q_w)\f(Q_w);
+  else
+      % Use iterative solver for the initial linear Darcy solve.
+      K_QQ = K_D(Q_w,Q_w);
+      [Ki, Kj, Kv] = find(K_QQ);
+      linear_system_solver.setup_preconditioner_ijv(Ki, Kj, Kv, sum(Q_w));
+      pw_0(Q_w)=linear_system_solver.solve(K_QQ, f(Q_w));
+  end
   pw_init=pw_0+pw_D;
 
   % Newton's solver
   it_max=50; % maximal number of iterations
   tol=1e-10; % relative tolerance for the Newton solver
   pw=SEEPAGE.newton_flow(pw_init,conduct0,Q_w,weight,Bw,C,K_D,wc,...
-            elem,coord,HatP,WF,eps_int,grho,it_max,tol);   
+            elem,coord,HatP,WF,eps_int,grho,it_max,tol,linear_system_solver);   
 
   % Remaining output arrays
   grad_p=reshape(Bw*pw',3,n_int);

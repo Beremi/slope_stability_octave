@@ -139,10 +139,18 @@ grho=9.81;
 % [Q_w, pw_D] = MESH.darcy_boundary_3D_hetero(coord, surf, triangle_labels, grho);
 [Q_w, pw_D] = MESH.seepage_boundary_3D_hetero_comsol(coord, surf, triangle_labels, grho);
 
+% Iterative solver for the seepage problem (scalar BoomerAMG, no nullspace)
+seepage_boomeramg_opts = struct('threads', 16, 'print_level', 0, ...
+    'use_as_preconditioner', true);
+seepage_solver = LINEAR_SOLVERS.set_linear_solver('agmg', 'DFGMRES_HYPRE_BOOMERAMG', ...
+    1e-6, 200, 1e-3, 1, Q_w, [], seepage_boomeramg_opts);
 
 % Computation on the pore pressure and its gradient
 [pw, grad_p, mater_sat]=SEEPAGE.seepage_problem_3D...
-    (coord,elem,Q_w,pw_D,grho,conduct0,HatP,DHatP1,DHatP2,DHatP3,WF);
+    (coord,elem,Q_w,pw_D,grho,conduct0,HatP,DHatP1,DHatP2,DHatP3,WF,seepage_solver);
+
+% Clean up HYPRE instance used for seepage
+LINEAR_SOLVERS.hypre_boomeramg_clear();
 
 % Saturation - a prescribed logical array indicating integration points
 %              where the body is saturated. If gamma_sat and gamma_unsat

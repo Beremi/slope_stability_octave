@@ -98,7 +98,16 @@ if isfield(opts, 'center_coordinates')
 end
 
 auto_dof_func = [];
-if ~isempty(coord) && ~isempty(Q) && isequal(size(Q), size(coord)) && ...
+is_scalar = ~isempty(Q) && (size(Q, 1) == 1);
+if is_scalar
+    % Scalar problem (e.g. seepage): no near-null-space, no component
+    % mapping.  Use classical-AMG defaults suitable for scalar diffusion.
+    if ~isfield(opts, 'nodal'),           opts.nodal = 0;            end
+    if ~isfield(opts, 'num_functions'),   opts.num_functions = 1;    end
+    if ~isfield(opts, 'interp_type'),     opts.interp_type = 6;     end
+    if ~isfield(opts, 'coarsen_type'),    opts.coarsen_type = 10;   end
+    if ~isfield(opts, 'strong_threshold'),opts.strong_threshold=0.25;end
+elseif ~isempty(coord) && ~isempty(Q) && isequal(size(Q), size(coord)) && ...
         any(size(coord, 1) == [2, 3])
     n_components = size(coord, 1);
 
