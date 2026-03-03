@@ -219,6 +219,11 @@ dim = 3;
 n_strain = dim * (dim + 1) / 2;
 constitutive_matrix_builder = CONSTITUTIVE_PROBLEM.CONSTITUTIVE(B, c0, phi, psi, Davis_type, shear, bulk, lame, WEIGHT, n_strain, n_int, dim);
 
+%% Attach shared profiler to both objects (class-level instrumentation)
+profiler = PROFILING.Profiler();
+constitutive_matrix_builder.profiler = profiler;
+linear_system_solver.profiler = profiler;
+
 %--------------------------------------------------------------------------
 %% Computation of the factor of safety for the SSR method
 
@@ -246,10 +251,14 @@ if indirect_on     % Indirect continuation method.
     fprintf("Running_time = %f \n", time_run);
 end
 
+%% Profiler report
+profiler.print_summary();
+
 
 %% removing surfaces not on the boundary of the domain
 % elem: 10 x Ne   (P2 tets)     surf: 6 x Ns (P2 tris)
 % Keeps only *outer* faces (faces that belong to exactly one tetra), based on corner vertices.
+% (NOTE: SolutionPlotter does this internally, but we also need filtered surf for the snapshot.)
 
 v = elem(1:4,:);  % corner (P1) vertices of each tetra
 
@@ -290,55 +299,30 @@ save(vis_snapshot_file, 'direct_on', 'indirect_on', ...
     'x1', 'x2', 'x3', 'y1', 'y2', 'z', '-v7');
 fprintf('\nSaved visualization snapshot: %s\n', vis_snapshot_file);
 
-%% Postprocessing - visualization of selected results for direct continuation
+%% Postprocessing - visualization using SolutionPlotter
+plotter = VIZ.SolutionPlotter(coord, elem, surf, B, Xi);
+plotter.set_pore_pressure(pw);
+
 if direct_on
-    % VIZ.draw_saturation_2D(coord,elem,mater_sat);
-    VIZ.draw_mesh_3D(coord,surf);
-    VIZ.draw_quantity_3D_old(coord,surf,zeros(size(coord)),pw,x1,x2,x3,y1,y2,z);
-    % VIZ.plot_pore_pressure_3D(pw,coord,elem);
-    VIZ.plot_displacements_3D(U3, coord, elem);
-    VIZ.plot_deviatoric_strain_3D(U3, coord, elem, B);
-    % Visualization of the curve: omega -> lambda for direct continuation.
-    figure; hold on; box on; grid on;
-    plot(omega_hist2, lambda_hist2, '-o');
-    title('Direct continuation method', 'Interpreter', 'latex')
-    xlabel('variable - $\xi$', 'Interpreter', 'latex');
-    ylabel('strength reduction factor - $\lambda$', 'Interpreter', 'latex');
+    plotter.add_solution('direct', U2, lambda_hist2, omega_hist2, Umax_hist2);
 end
-
-
-
-%% Postprocessing - visualization of selected results for indirect continuation
 if indirect_on
-    % show mesh
-    VIZ.draw_mesh_3D(coord,surf);
-    drawnow
-    pause(0.5)
-    % show pore pressure
-    VIZ.plot_pore_pressure_3D(pw,coord, surf);
-    drawnow
-    pause(0.5)
-    % show displacement
-    VIZ.plot_displacements_3D(U3, coord, elem, surf, 0.05*max(abs(coord(:)))/max(abs(U3(:))));
-    drawnow
-    pause(0.5)
-    % show deviatoric stress
-    VIZ.plot_deviatoric_strain_3D(U3, coord, elem, surf, B);
-    % edit colorbar of deviatoric stress, and keep the edit for slices
-    cl = caxis(gca);
-    clim = [cl(1), 0.25*cl(2)];
-    caxis(clim);
-    drawnow
-    pause(0.5)
-    % visualisation of slices
-    plane_vals = {[], [35], [1e-16, 21.6506]};
-    [figs, info] = VIZ.plot_deviatoric_norm_slices(B, U3, elem, coord, Xi, surf, plane_vals, 1);
-
-
-    % Visualization of the curve: omega -> lambda for indirect continuation.
-    figure; hold on; box on; grid on;
-    plot(omega_hist3, lambda_hist3, '-o');
-    title('Indirect continuation method', 'Interpreter', 'latex')
-    xlabel('control variable - $\omega$', 'Interpreter', 'latex');
-    ylabel('strength reduction factor - $\lambda$', 'Interpreter', 'latex');
+    plotter.add_solution('indirect', U3, lambda_hist3, omega_hist3, Umax_hist3);
 end
+
+plotter.plot_mesh();
+drawnow; pause(0.5);
+
+plotter.plot_pore_pressure();
+drawnow; pause(0.5);
+
+plotter.plot_displacements();
+drawnow; pause(0.5);
+
+plotter.plot_deviatoric_strain(0.25);
+drawnow; pause(0.5);
+
+plane_vals = {[], [35], [1e-16, 21.6506]};
+plotter.plot_deviatoric_slices(plane_vals, 1);
+
+plotter.plot_convergence();

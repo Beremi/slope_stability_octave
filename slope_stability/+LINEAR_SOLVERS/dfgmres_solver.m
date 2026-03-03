@@ -1,7 +1,7 @@
-function [x, iters, res_hist, timing] = dfgmres_solver(A, b, M, W, maxits, tol, x0)
+function [x, iters, res_hist] = dfgmres_solver(A, b, M, W, maxits, tol, x0, profiler)
 %DFGMRES  Deflated Flexible GMRES iterative solver.
 %
-%   [x, iters, res_hist, timing] = DFGMRES(A, b, M, W, maxits, tol, x0)
+%   [x, iters, res_hist] = DFGMRES(A, b, M, W, maxits, tol, x0, profiler)
 %   solves the linear system A*x = b using a deflated version of the
 %   flexible GMRES method.
 %
@@ -18,17 +18,16 @@ function [x, iters, res_hist, timing] = dfgmres_solver(A, b, M, W, maxits, tol, 
 %       maxits - Maximum number of iterations (default: 1000)
 %       tol    - Relative residual tolerance (default: 1e-6)
 %       x0     - Initial guess (default: zero vector)
+%       profiler - Optional PROFILING.Profiler handle ([] = disabled)
 %
 %   Outputs:
 %       x        - Computed solution vector
 %       iters    - Number of iterations performed
 %       res_hist - History of the relative residual norms
-%       timing   - Struct with per-section wall-clock times and hit counts:
-%                    t_init, t_precond, t_project, t_matvec, t_ortho,
-%                    t_leastsq, t_reconstruct, n_iters, n_matvecs,
-%                    n_prec_applies.
 %
 %   See also GMRES, PCG.
+
+if nargin < 8, profiler = []; end
 
 % --- Timing accumulators ---
 t_precond    = 0;
@@ -82,7 +81,11 @@ if res_hist(1) < tol
     timing = struct('t_init', t_init, 't_precond', 0, 't_project', 0, ...
         't_matvec', 0, 't_ortho', 0, 't_leastsq', 0, ...
         't_reconstruct', 0, 'n_iters', 0, ...
-        'n_matvecs', n_matvecs, 'n_prec_applies', 0);
+        'n_matvecs', n_matvecs, 'n_prec_applies', 0);  %#ok<NASGU>
+    if ~isempty(profiler)
+        profiler.add_time('DFGMRES.solve/init', t_init);
+        profiler.add_count('DFGMRES.solve.n_matvecs', n_matvecs);
+    end
     return;
 end
 
@@ -161,16 +164,18 @@ t_tmp = tic;
 x = x + W(:,1:iters) * y;
 t_reconstruct = toc(t_tmp);
 
-% --- Build timing struct ---
-timing.t_init        = t_init;
-timing.t_precond     = t_precond;
-timing.t_project     = t_project;
-timing.t_matvec      = t_matvec;
-timing.t_ortho       = t_ortho;
-timing.t_leastsq     = t_leastsq;
-timing.t_reconstruct = t_reconstruct;
-timing.n_iters       = iters;
-timing.n_matvecs     = n_matvecs;
-timing.n_prec_applies = n_prec_applies;
+% Feed profiler if provided
+if ~isempty(profiler)
+    profiler.add_time('DFGMRES.solve/init', t_init);
+    profiler.add_time('DFGMRES.solve/precond_apply', t_precond);
+    profiler.add_time('DFGMRES.solve/deflation_project', t_project);
+    profiler.add_time('DFGMRES.solve/matvec', t_matvec);
+    profiler.add_time('DFGMRES.solve/arnoldi_ortho', t_ortho);
+    profiler.add_time('DFGMRES.solve/least_squares', t_leastsq);
+    profiler.add_time('DFGMRES.solve/reconstruct', t_reconstruct);
+    profiler.add_count('DFGMRES.solve.n_gmres_iters', iters);
+    profiler.add_count('DFGMRES.solve.n_matvecs', n_matvecs);
+    profiler.add_count('DFGMRES.solve.n_prec_applies', n_prec_applies);
+end
 
 end

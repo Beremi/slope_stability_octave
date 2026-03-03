@@ -29,7 +29,7 @@ function [U_it, flag_N, it, history] = newton(U_ini, tol, it_newt_max, it_damp_m
 %   U_it    - Computed displacement field approximating the solution.
 %   flag_N  - Newton solver flag: 0 if converged, 1 if not converged.
 %   it      - Number of Newton iterations performed.
-%   history - Struct with timing profile (same fields as newton_ind_SSR).
+%   history - Struct (currently empty; timing is handled by PROFILING.Profiler).
 %--------------------------------------------------------------------------
 %
 % Initialization.
@@ -48,26 +48,13 @@ if ~constitutive_matrix_builder.pattern_initialized
 end
 n_Q = constitutive_matrix_builder.n_Q;
 
-% Timing accumulators.
-t_build_F_and_DS = 0;
-t_K_r_assembly   = 0;
-t_sparsersb_build = 0;
-t_setup_preconditioner = 0;
-t_A_orthogonalize = 0;
-t_solve = 0;
-t_damping = 0;
-t_expand_deflation = 0;
-
 % Newton's iteration loop.
 while true
     it = it + 1;
-    t_step = tic;
 
     % Compute internal force and tangent moduli.
     if compute_diffs
-        t_tmp = tic;
         F = constitutive_matrix_builder.build_F_and_DS_reduced(U_it);
-        t_build_F_and_DS = t_build_F_and_DS + toc(t_tmp);
     end
 
     % Compute relative residual criterion.
@@ -78,32 +65,20 @@ while true
     end
 
     % Build K_r(Q,Q) as [I, J, V] triplets  →  sparsersb.
-    t_tmp = tic;
     [K_I, K_J, K_V] = constitutive_matrix_builder.build_K_r_QQ_vals(r);
-    t_K_r_assembly = t_K_r_assembly + toc(t_tmp);
 
-    t_tmp = tic;
     K_rQQ = sparsersb(K_I, K_J, K_V, n_Q, n_Q);
-    t_sparsersb_build = t_sparsersb_build + toc(t_tmp);
 
     % Setup preconditioner  (HYPRE reuses pattern automatically on same instance).
-    t_tmp = tic;
     linear_system_solver.setup_preconditioner_ijv(K_I, K_J, K_V, n_Q);
-    t_setup_preconditioner = t_setup_preconditioner + toc(t_tmp);
 
-    t_tmp = tic;
     linear_system_solver.A_orthogonalize(K_rQQ);
-    t_A_orthogonalize = t_A_orthogonalize + toc(t_tmp);
 
     % Solve for the Newton increment.
-    t_tmp = tic;
     dU(Q) = linear_system_solver.solve(K_rQQ, f(Q) - F(Q));
-    t_solve = t_solve + toc(t_tmp);
 
     % Determine damping factor via line search.
-    t_tmp = tic;
     alpha = NEWTON.damping(it_damp_max, U_it, dU, F, f, constitutive_matrix_builder);
-    t_damping = t_damping + toc(t_tmp);
 
     % Regularization adjustments based on alpha.
     compute_diffs = 1;
@@ -116,9 +91,7 @@ while true
         end
     else
         % Expand deflation basis with the computed increment.
-        t_tmp = tic;
         linear_system_solver.expand_deflation_basis(dU(Q));
-        t_expand_deflation = t_expand_deflation + toc(t_tmp);
         if alpha > 0.5
             r = max(r / sqrt(2), r_min);
         end
@@ -133,8 +106,8 @@ while true
     % Update displacement.
     U_it = U_it + alpha * dU;
 
-    fprintf('  newton it=%d  resid=%.2e  alpha=%.2f  r=%.3g  step_time=%.2f s\n', ...
-        it, criterion, alpha, r, toc(t_step));
+    fprintf('  newton it=%d  resid=%.2e  alpha=%.2f  r=%.3g\n', ...
+        it, criterion, alpha, r);
 
     % Check for divergence or maximum iterations.
     if isnan(criterion) || (it == it_newt_max)
@@ -145,14 +118,7 @@ while true
 
 end % while
 
-% Build timing profile.
-history.timing.build_F_and_DS       = t_build_F_and_DS;
-history.timing.K_r_assembly         = t_K_r_assembly;
-history.timing.sparsersb_build      = t_sparsersb_build;
-history.timing.setup_preconditioner = t_setup_preconditioner;
-history.timing.A_orthogonalize      = t_A_orthogonalize;
-history.timing.solve                = t_solve;
-history.timing.damping              = t_damping;
-history.timing.expand_deflation     = t_expand_deflation;
+% Build output history (timing is handled by the class-level Profiler).
+history = struct();
 
 end % function
