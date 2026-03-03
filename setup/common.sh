@@ -60,6 +60,18 @@ require_cmd() {
   fi
 }
 
+require_pkg() {
+  local pkg="$1"
+  local hint="${2:-}"
+  if ! pkg-config --exists "${pkg}" 2>/dev/null; then
+    local msg="Missing required library: ${pkg} (not found by pkg-config)"
+    if [[ -n "${hint}" ]]; then
+      msg="${msg}\n  Install hint: ${hint}"
+    fi
+    fail "${msg}"
+  fi
+}
+
 ensure_dirs() {
   mkdir -p "${SRC_DIR}" "${BUILD_DIR}" "${INSTALL_DIR}" "${RESULTS_DIR}" "${OCTAVE_ALL_DIR}/bin"
 }

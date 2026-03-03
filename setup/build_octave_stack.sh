@@ -131,6 +131,12 @@ build_octave() {
     --disable-docs \
     --with-blas="-L${OPENBLAS_PREFIX}/lib -lopenblas" \
     --with-lapack="-L${OPENBLAS_PREFIX}/lib -lopenblas"
+
+  # Verify that configure detected HDF5 (required for .h5 mesh loading)
+  if ! grep -q 'HAVE_HDF5 1' config.h 2>/dev/null; then
+    fail "Octave configure did not find HDF5. Install libhdf5-dev (Debian/Ubuntu), hdf5 (Arch), or hdf5-devel (Fedora)."
+  fi
+
   make -j"${NPROC}"
   make install
   popd >/dev/null
@@ -258,6 +264,8 @@ main() {
   require_cmd gcc
   require_cmd g++
   require_cmd gfortran
+  require_cmd pkg-config
+  require_pkg hdf5 "Arch: pacman -S hdf5  |  Debian/Ubuntu: apt install libhdf5-dev  |  Fedora: dnf install hdf5-devel"
 
   prepare_sources
   build_openblas

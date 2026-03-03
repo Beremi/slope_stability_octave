@@ -27,7 +27,37 @@ sudo apt-get install -y \
   libz-dev libbz2-dev liblzma-dev libfftw3-dev libarpack2-dev \
   libhdf5-dev libgraphicsmagick++1-dev libgl2ps-dev \
   libsndfile1-dev libportaudio2 \
+  qt6-base-dev libqt6opengl6-dev libqt6svg6-dev libqscintilla2-qt6-dev \
+  libgl-dev libegl-dev mesa-common-dev \
   python3 python3-venv python3-pip
+```
+
+Typical Arch Linux baseline:
+
+```bash
+sudo pacman -S --needed \
+  base-devel gcc-fortran perl m4 pkgconf cmake ninja \
+  bison flex gawk sed tar xz curl wget \
+  readline ncurses pcre2 curl \
+  zlib bzip2 xz fftw arpack \
+  hdf5 graphicsmagick gl2ps \
+  libsndfile portaudio \
+  qt6-base mesa libglvnd qscintilla-qt6 \
+  python python-virtualenv python-pip
+```
+
+Typical Fedora baseline:
+
+```bash
+sudo dnf install -y \
+  gcc gcc-c++ gcc-gfortran perl m4 pkgconf cmake ninja-build \
+  bison flex gawk sed tar xz curl wget \
+  readline-devel ncurses-devel pcre2-devel libcurl-devel \
+  zlib-devel bzip2-devel xz-devel fftw-devel arpack-devel \
+  hdf5-devel GraphicsMagick-c++-devel gl2ps-devel \
+  libsndfile-devel portaudio-devel \
+  qt6-qtbase-devel mesa-libGL-devel qscintilla-qt6-devel \
+  python3 python3-virtualenv python3-pip
 ```
 
 If some optional Octave features are missing, configure will print which libraries are absent.
