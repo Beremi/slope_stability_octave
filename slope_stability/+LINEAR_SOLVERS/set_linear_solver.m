@@ -1,9 +1,17 @@
-function [linear_system_solver] = set_linear_solver(agmg_folder, solver_type, ...
-    linear_solver_tolerance, linear_solver_maxit, deflation_basis_tolerance, ...
-    linear_solver_printing, Q, coord, boomeramg_opts)
+function [linear_system_solver] = set_linear_solver(varargin)
 %SET_LINEAR_SOLVER Factory for iterative/direct solver configuration.
 %
-% Existing API is preserved. Additional optional BoomerAMG inputs:
+% Supported call signatures:
+%
+% Legacy (kept for compatibility):
+%   set_linear_solver(agmg_folder, solver_type, tol, maxit, defl_tol, print, Q, coord, opts)
+%
+% Unified/default AGMG-folder form:
+%   set_linear_solver(solver_type, tol, maxit, defl_tol, print, Q, coord, opts)
+%
+% In the unified form, agmg_folder is automatically set to 'agmg'.
+%
+% Additional optional BoomerAMG inputs:
 %   coord          - nodal coordinates (2/3 x n) for automatic component
 %                    mapping. For 3D, elasticity near-null-space vectors
 %                    are also built automatically.
@@ -13,15 +21,11 @@ function [linear_system_solver] = set_linear_solver(agmg_folder, solver_type, ..
 %                      null_space        - explicit near-null-space basis
 %                      center_coordinates - center coords for rotation modes
 
-if nargin < 7
-    Q = [];
-end
-if nargin < 8
-    coord = [];
-end
-if nargin < 9 || isempty(boomeramg_opts)
-    boomeramg_opts = struct();
-end
+[agmg_folder, solver_type, linear_solver_tolerance, linear_solver_maxit, ...
+    deflation_basis_tolerance, linear_solver_printing, Q, coord, boomeramg_opts] = ...
+    local_parse_set_linear_solver_args(varargin{:});
+agmg_folder = local_resolve_agmg_folder(agmg_folder);
+
 if ~isstruct(boomeramg_opts)
     error('boomeramg_opts must be a struct or empty.');
 end
@@ -64,6 +68,78 @@ switch solver_type
         error('Bad choice of solver type: %s', char(solver_type));
 end
 
+end
+
+function [agmg_folder, solver_type, linear_solver_tolerance, linear_solver_maxit, ...
+    deflation_basis_tolerance, linear_solver_printing, Q, coord, boomeramg_opts] = ...
+    local_parse_set_linear_solver_args(varargin)
+
+if nargin < 6
+    error(['set_linear_solver: expected at least 6 inputs. ', ...
+        'Use either legacy or unified signature.']);
+end
+
+if local_is_solver_type_token(varargin{1})
+    agmg_folder = 'agmg';
+    offset = 0;
+else
+    agmg_folder = varargin{1};
+    offset = 1;
+end
+
+solver_type = varargin{1 + offset};
+linear_solver_tolerance = varargin{2 + offset};
+linear_solver_maxit = varargin{3 + offset};
+deflation_basis_tolerance = varargin{4 + offset};
+linear_solver_printing = varargin{5 + offset};
+
+if nargin >= 6 + offset
+    Q = varargin{6 + offset};
+else
+    Q = [];
+end
+if nargin >= 7 + offset
+    coord = varargin{7 + offset};
+else
+    coord = [];
+end
+if nargin >= 8 + offset && ~isempty(varargin{8 + offset})
+    boomeramg_opts = varargin{8 + offset};
+else
+    boomeramg_opts = struct();
+end
+
+end
+
+function tf = local_is_solver_type_token(value_in)
+token = upper(strtrim(local_to_char(value_in)));
+tf = ismember(token, {'DIRECT', 'DFGMRES_ICHOL', 'DFGMRES_AGMG', ...
+    'DFGMRES_HYPRE_BOOMERAMG', 'DFGMRES_BOOMERAMG', ...
+    'BOOMERAMG', 'HYPRE_BOOMERAMG'});
+end
+
+function agmg_folder_out = local_resolve_agmg_folder(agmg_folder_in)
+agmg_folder_out = agmg_folder_in;
+if isempty(agmg_folder_out)
+    agmg_folder_out = 'agmg';
+end
+
+agmg_char = local_to_char(agmg_folder_out);
+if exist(agmg_char, 'dir')
+    agmg_folder_out = agmg_char;
+    return;
+end
+
+if strcmpi(agmg_char, 'agmg')
+    this_dir = fileparts(mfilename('fullpath'));
+    repo_local_agmg = fullfile(fileparts(this_dir), 'agmg');
+    if exist(repo_local_agmg, 'dir')
+        agmg_folder_out = repo_local_agmg;
+        return;
+    end
+end
+
+agmg_folder_out = agmg_char;
 end
 
 function [preconditioner_builder, prec_init, prec_update, prec_apply] = local_build_boomer_builder(Q, coord, opts_in)

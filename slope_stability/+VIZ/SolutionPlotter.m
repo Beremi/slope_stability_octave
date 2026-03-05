@@ -30,6 +30,8 @@ classdef SolutionPlotter < handle
         faces_struct    % precomputed 3D face-detection struct
 
         pore_pressure   % nodal pore-pressure field or []
+        material_identifier % element-level material ids or []
+        element_saturation  % element-level saturation flags or []
         solutions       % struct array with registered solutions
         n_solutions     % number of registered solutions
         camera_view_tag % camera preset tag for 3D views
@@ -63,6 +65,8 @@ classdef SolutionPlotter < handle
             obj.B = B;
             obj.Xi = Xi;
             obj.pore_pressure = [];
+            obj.material_identifier = [];
+            obj.element_saturation = [];
             obj.solutions = struct('name', {}, 'U', {}, 'lambda_hist', {}, ...
                 'omega_hist', {}, 'Umax_hist', {}, 'curve_meta', {});
             obj.n_solutions = 0;
@@ -84,6 +88,14 @@ classdef SolutionPlotter < handle
 
         function set_pore_pressure(obj, pw)
             obj.pore_pressure = pw;
+        end
+
+        function set_material_identifier(obj, material_identifier)
+            obj.material_identifier = material_identifier;
+        end
+
+        function set_element_saturation(obj, element_saturation)
+            obj.element_saturation = element_saturation;
         end
 
         function add_solution(obj, name, U, lambda_hist, omega_hist, Umax_hist, curve_meta)
@@ -160,6 +172,27 @@ classdef SolutionPlotter < handle
                 obj.draw_bounding_edges(ax);
             end
             title(ax, 'Pore pressures [kPa]');
+            drawnow;
+        end
+
+        function fig = plot_material_map(obj)
+            assert(~isempty(obj.material_identifier), ...
+                'VIZ.SolutionPlotter: no material_identifier registered (call set_material_identifier first).');
+            fig = obj.new_figure('Material map');
+            ax = gca;
+            obj.draw_element_quantity_on_axes(ax, double(obj.material_identifier));
+            title(ax, 'Material identifier');
+            drawnow;
+        end
+
+        function fig = plot_saturation(obj)
+            assert(~isempty(obj.element_saturation), ...
+                'VIZ.SolutionPlotter: no element saturation registered (call set_element_saturation first).');
+            fig = obj.new_figure('Saturation');
+            ax = gca;
+            obj.draw_element_quantity_on_axes(ax, double(obj.element_saturation));
+            caxis(ax, [0 1]);
+            title(ax, 'Saturation');
             drawnow;
         end
 
@@ -317,9 +350,9 @@ classdef SolutionPlotter < handle
                 end
 
                 plot(ax, sol.omega_hist, sol.lambda_hist, mk, 'LineWidth', 1.2);
-                xlabel(ax, local_plain_label(sol.curve_meta.xlabel), 'Interpreter', 'none');
-                ylabel(ax, local_plain_label(sol.curve_meta.ylabel), 'Interpreter', 'none');
-                title(ax, sol.curve_meta.title, 'Interpreter', 'none');
+                xlabel(ax, sol.curve_meta.xlabel, 'Interpreter', 'latex');
+                ylabel(ax, sol.curve_meta.ylabel, 'Interpreter', 'latex');
+                title(ax, sol.curve_meta.title, 'Interpreter', 'latex');
                 hold(ax, 'off');
                 drawnow;
             end
@@ -522,6 +555,23 @@ classdef SolutionPlotter < handle
             obj.draw_quantity_on_axes(ax, coord_new, elem_new, zeros(size(coord_new)), val_new, false);
         end
 
+        function draw_element_quantity_on_axes(obj, ax, elem_values)
+            assert(numel(elem_values) == size(obj.elem, 2), ...
+                'VIZ.SolutionPlotter: elem_values must have one value per element.');
+
+            if obj.mesh_dim == 3
+                [bnd_faces, bnd_coord, bnd_vals] = ...
+                    VIZ.boundary_stress_from_elements_3D(obj.coord, obj.elem, elem_values);
+                obj.draw_quantity_on_axes(ax, bnd_coord, bnd_faces, ...
+                    zeros(size(bnd_coord)), bnd_vals);
+                obj.draw_bounding_edges(ax);
+                return;
+            end
+
+            [coord_new, elem_new, val_new] = obj.expand_element_values_2d(elem_values(:).');
+            obj.draw_quantity_on_axes(ax, coord_new, elem_new, zeros(size(coord_new)), val_new, false);
+        end
+
         function draw_slice_on_axes(obj, ax, TR2, poly3, transformed_points, ...
                 norm_E, plane_id, plane_val, free_axes, h, clim, cmap_name) %#ok<INUSL>
             CL = TR2.ConnectivityList;
@@ -610,12 +660,47 @@ classdef SolutionPlotter < handle
                 elem_new = reshape(1:numel(elem_base), size(elem_base));
             end
 
+            n_local = size(elem_base, 1);
+            n_elem = size(elem_base, 2);
+
             x = obj.coord(1, :);
             y = obj.coord(2, :);
             x_elem = reshape(x(elem_base), 1, []);
             y_elem = reshape(y(elem_base), 1, []);
             coord_new = [x_elem; y_elem];
-            val_new = elem_values(:);
+
+            % Accept both:
+            %   (1 x n_elem) / (n_elem x 1): one value per element
+            %   (n_local x n_elem): one value per local plotting node
+            if isvector(elem_values)
+                v = elem_values(:);
+                if numel(v) == n_elem
+                    val_mat = repmat(v.', n_local, 1);
+                elseif numel(v) == n_local * n_elem
+                    val_mat = reshape(v, n_local, n_elem);
+                else
+                    error(['VIZ.SolutionPlotter: elem_values size mismatch. ', ...
+                        'Expected n_elem or n_local*n_elem values.']);
+                end
+            else
+                [r, c] = size(elem_values);
+                if r == n_local && c == n_elem
+                    val_mat = elem_values;
+                elseif r == n_elem && c == n_local
+                    val_mat = elem_values.';
+                elseif r == 1 && c == n_elem
+                    val_mat = repmat(elem_values, n_local, 1);
+                elseif c == 1 && r == n_elem
+                    val_mat = repmat(elem_values.', n_local, 1);
+                elseif numel(elem_values) == n_local * n_elem
+                    val_mat = reshape(elem_values, n_local, n_elem);
+                else
+                    error(['VIZ.SolutionPlotter: elem_values size mismatch. ', ...
+                        'Expected [n_local x n_elem] or one value per element.']);
+                end
+            end
+
+            val_new = reshape(val_mat, [], 1);
         end
 
     end
@@ -766,7 +851,7 @@ end
 function meta = local_default_curve_meta(name)
 meta = struct();
 meta.title = sprintf('Continuation: %s', name);
-meta.xlabel = 'Control variable - omega';
+meta.xlabel = 'Control variable - $\omega$';
 meta.ylabel = 'Continuation parameter';
 meta.marker = '';
 end
@@ -791,25 +876,4 @@ end
 if isfield(meta_in, 'marker') && ~isempty(meta_in.marker)
     meta.marker = meta_in.marker;
 end
-end
-
-function txt = local_plain_label(txt_in)
-if isempty(txt_in)
-    txt = '';
-    return;
-end
-if isstring(txt_in)
-    txt = char(txt_in);
-else
-    txt = txt_in;
-end
-txt = strrep(txt, '$', '');
-txt = strrep(txt, '\\omega', 'omega');
-txt = strrep(txt, '\omega', 'omega');
-txt = strrep(txt, '\\lambda', 'lambda');
-txt = strrep(txt, '\lambda', 'lambda');
-txt = strrep(txt, '\\xi', 'xi');
-txt = strrep(txt, '\xi', 'xi');
-txt = strrep(txt, '{', '');
-txt = strrep(txt, '}', '');
 end

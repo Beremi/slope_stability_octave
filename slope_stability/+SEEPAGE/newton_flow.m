@@ -34,6 +34,9 @@ function pw = newton_flow(pw_init, conduct0, Q_w, weight, Bw, C, K_D, wc, ...
 %--------------------------------------------------------------------------
 
 use_iterative = (nargin >= 17) && ~isempty(linear_system_solver);
+can_reuse_ijv = use_iterative && ...
+    ~isempty(linear_system_solver.preconditioner_initializator) && ...
+    ~isempty(linear_system_solver.preconditioner_updater);
 
 % Dimensions.
 n_n   = size(coord, 2);
@@ -47,7 +50,12 @@ n_Qw  = sum(Q_w);
 % Initialisation.
 pw = pw_init;
 it = 0;
-first_ijv_setup = true;
+status_msg = 'unknown';
+last_progress_chars = 0;
+linear_iters_total = 0;
+t_newton_start = tic;
+norm_ref = max(1, norm(pw_init));
+rel_update = NaN;
 
 % Damping parameters (same style as NEWTON.newton).
 it_damp_max = 10;
@@ -58,6 +66,7 @@ wc2 = repmat(wc, dim, 1);
 
 while true
     it = it + 1;
+    t_step = tic;
 
     % ------------------------------------------------------------------
     %  Evaluate relative permeability and its derivative
@@ -100,20 +109,21 @@ while true
     if use_iterative
         K_QQ = K(Q_w, Q_w);
         rhs  = f(Q_w);
-
-        % IJV for HYPRE.  The sparsity pattern can change (E depends on
-        % the active zone), so we re-do setup_preconditioner_ijv each time.
-        [K_I, K_J, K_V] = find(K_QQ);
-        if first_ijv_setup
+        if can_reuse_ijv
+            % IJV for HYPRE.  The sparsity pattern can change (E depends on
+            % the active zone), so we re-do setup_preconditioner_ijv each time.
+            [K_I, K_J, K_V] = find(K_QQ);
             linear_system_solver.setup_preconditioner_ijv(K_I, K_J, K_V, n_Qw);
-            first_ijv_setup = false;
         else
-            linear_system_solver.setup_preconditioner_ijv(K_I, K_J, K_V, n_Qw);
+            linear_system_solver.setup_preconditioner(K_QQ);
         end
         linear_system_solver.A_orthogonalize(K_QQ);
-        dp(Q_w) = linear_system_solver.solve(K_QQ, rhs);
+        [dp_q, lin_it] = linear_system_solver.solve(K_QQ, rhs);
+        dp(Q_w) = dp_q;
+        linear_iters_total = linear_iters_total + lin_it;
     else
         dp(Q_w) = K(Q_w, Q_w) \ f(Q_w);
+        lin_it = 0;
     end
 
     % ------------------------------------------------------------------
@@ -161,18 +171,44 @@ while true
     % ------------------------------------------------------------------
     %  Stopping criteria
     % ------------------------------------------------------------------
-    crit = norm(dp) / norm(pw_init);
-    fprintf('  seepage newton it=%d  resid=%.2e  alpha=%.2f\n', it, crit, alpha);
+    rel_update = norm(dp) / norm_ref;
+    progress_line = sprintf('  seepage_newton it=%d  rel_update=%.2e  alpha=%.2f  lin_it=%d  step_time=%.2f s', ...
+        it, rel_update, alpha, lin_it, toc(t_step));
+    last_progress_chars = local_print_progress(progress_line, last_progress_chars);
 
-    if crit < tol
-        fprintf('Seepage Newton converges: iteration = %d, stopping criterion = %e\n', it, crit);
+    if rel_update < tol
+        status_msg = 'converged';
+        break;
+    end
+    if isnan(rel_update)
+        status_msg = 'nan_update';
+        warning('Seepage Newton produced NaN update norm.');
         break;
     end
     if it > it_max
+        status_msg = 'max_iterations';
         warning('Seepage Newton does not converge.');
-        fprintf('  stopping criterion = %e\n', crit);
         break;
     end
 end
 
+newton_wall_time = toc(t_newton_start);
+local_finish_progress(last_progress_chars);
+fprintf(['seepage_newton summary: status=%s, it=%d, rel_update=%e, ', ...
+    'lin_it_total=%d, wall_time=%.2f s\n'], ...
+    status_msg, it, rel_update, linear_iters_total, newton_wall_time);
+
+end
+
+function last_chars = local_print_progress(msg, last_chars)
+pad = max(0, last_chars - numel(msg));
+fprintf('\r%s%s', msg, repmat(' ', 1, pad));
+fflush(stdout);
+last_chars = numel(msg);
+end
+
+function local_finish_progress(last_chars)
+if last_chars > 0
+    fprintf('\r%s\r', repmat(' ', 1, last_chars));
+end
 end

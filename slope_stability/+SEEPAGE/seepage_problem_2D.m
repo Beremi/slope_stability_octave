@@ -1,5 +1,9 @@
 function [pw, grad_p, mater_sat]=seepage_problem_2D...
-                         (coord,elem,Q_w,pw_D,grho,conduct0,HatP,DHatP1,DHatP2,WF)
+    (coord,elem,Q_w,pw_D,grho,conduct0,HatP,DHatP1,DHatP2,WF,linear_system_solver)
+
+if nargin < 11 || isempty(linear_system_solver)
+  linear_system_solver = local_default_hypre_solver(Q_w, coord);
+end
 
   
   % number of nodes, elements, etc.
@@ -36,14 +40,15 @@ function [pw, grad_p, mater_sat]=seepage_problem_2D...
   
   % initialization of the pressure field
   pw_0=zeros(1,n_n);
-  pw_0(Q_w)=K_D(Q_w,Q_w)\f(Q_w);
+  K_QQ = K_D(Q_w,Q_w);
+  pw_0(Q_w)=local_solve_linear_system(linear_system_solver, K_QQ, f(Q_w));
   pw_init=pw_0+pw_D;
 
   % Newton's solver
   it_max=50; % maximal number of iterations
   tol=1e-10; % relative tolerance for the Newton solver
   pw=SEEPAGE.newton_flow(pw_init,conduct0,Q_w,weight,Bw,C,K_D,wc,...
-            elem,coord,HatP,WF,eps_int,grho,it_max,tol);   
+            elem,coord,HatP,WF,eps_int,grho,it_max,tol,linear_system_solver);
   
   % Remaining output arrays
   grad_p=reshape(Bw*pw',2,n_int);
@@ -59,4 +64,31 @@ function [pw, grad_p, mater_sat]=seepage_problem_2D...
   mater_sat=false(1,n_e);
   mater_sat(pw_aver_e>=0.1*eps)=1;    
                    
+end
+
+function x = local_solve_linear_system(linear_system_solver, A, b)
+n = size(A, 1);
+can_reuse_ijv = ~isempty(linear_system_solver.preconditioner_initializator) && ...
+    ~isempty(linear_system_solver.preconditioner_updater);
+if can_reuse_ijv
+    [Ai, Aj, Av] = find(A);
+    linear_system_solver.setup_preconditioner_ijv(Ai, Aj, Av, n);
+else
+    linear_system_solver.setup_preconditioner(A);
+end
+linear_system_solver.A_orthogonalize(A);
+[x, ~] = linear_system_solver.solve(A, b);
+end
+
+function linear_system_solver = local_default_hypre_solver(Q_w, coord)
+solver_type = 'DFGMRES_HYPRE_BOOMERAMG';
+linear_solver_tolerance = 1e-8;
+linear_solver_maxit = 400;
+deflation_basis_tolerance = 1e-8;
+linear_solver_printing = 0;
+boomeramg_opts = struct('threads', 16, 'print_level', 0, ...
+    'use_as_preconditioner', true);
+linear_system_solver = LINEAR_SOLVERS.set_linear_solver(solver_type, ...
+    linear_solver_tolerance, linear_solver_maxit, ...
+    deflation_basis_tolerance, linear_solver_printing, Q_w, coord, boomeramg_opts);
 end
