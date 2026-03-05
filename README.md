@@ -201,6 +201,26 @@ jupyter lab                        # open in browser
 
 Open `slope_stability/slope_stability_3D_hetero_seepage_SSR_comsol_demo.ipynb` and select the **Octave (local-rsb)** kernel.
 
+### Devcontainer and Docker
+
+A repo-level [`Dockerfile`](Dockerfile) and [`.devcontainer/devcontainer.json`](.devcontainer/devcontainer.json) are included for a reproducible container setup.
+
+- In a Dev Container, first creation runs `./bootstrap_all.sh --no-clean --no-verify` from `.devcontainer/post-create.sh`, so the heavy local stack is built inside the mounted workspace instead of being hidden in the image layer.
+- Each new interactive `bash` session auto-exports the local Octave runtime and the repo `.venv` when those directories exist.
+- If the repo already contains `.octave_all/` or `.venv/` from a different absolute path, the devcontainer bootstrap detects that and rebuilds them once so the wrapper scripts and Jupyter kernel point at `/workspaces/slope_stability`.
+
+Plain Docker usage:
+
+```bash
+docker build -t slope-stability-dev .
+docker run --rm -it \
+  -e SLOPE_STABILITY_REPO=/workspaces/slope_stability \
+  -v "$PWD":/workspaces/slope_stability \
+  slope-stability-dev bash
+```
+
+If you want the benchmark checks as part of the container workflow, run `THREADS=$(nproc) setup/verify_stack.sh` after the initial bootstrap completes.
+
 ### Individual setup scripts (in `setup/`)
 
 | Script                         | Purpose                                           |

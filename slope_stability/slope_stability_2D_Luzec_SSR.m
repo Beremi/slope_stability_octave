@@ -1,4 +1,30 @@
-%%  Heterogeneous slope in Doubrava-Kozinec and its stability (SSR methods)
+% Auto-generated from slope_stability_2D_Luzec_SSR.ipynb.
+
+% Update the notebook first, then re-run scripts/sync_notebooks_to_m.py.
+
+%% Heterogeneous slope in Doubrava-Kozinec and its stability (SSR methods)
+
+%% Notes Before Running
+% - Activate local environment: `source setup/activate_optimized_octave.sh`
+% - Activate Jupyter venv: `source .venv/bin/activate`
+% - In Jupyter, select kernel **Octave (local-rsb)**
+
+close all; clearvars; clc;
+%plot -f png -r 600
+pkg load sparsersb;
+
+try
+    graphics_toolkit('qt');
+catch
+    graphics_toolkit('gnuplot');
+end
+set(0, 'defaultfigurevisible', 'off');
+
+fprintf('Working directory: %s\n', pwd);
+fprintf('Graphics toolkit: %s\n', graphics_toolkit());
+
+%% Heterogeneous slope in Doubrava-Kozinec and its stability (SSR methods)
+
 % =========================================================================
 %
 %  This program solves a 2D slope stability problem by the modified shear
@@ -57,12 +83,14 @@ k = [0.864e-3  % S1 - weathered claystone
     0.86]; % S8 - clayey sand
 
 %% Data from the reference element
+
 % quadrature points and weights for volume integration
 [Xi, WF] = ASSEMBLY.quadrature_volume_2D(elem_type);
 % local basis functions and their derivatives
 [HatP,DHatP1,DHatP2] = ASSEMBLY.local_basis_volume_2D(elem_type, Xi);
 
 %% Creation/loading of the finite element mesh
+
 % Available Luzec mesh family in meshes/Luzec/ (nodes / elements):
 %   P1:  4571 / 8772
 %   P2: 17913 / 8772
@@ -144,14 +172,13 @@ materials = cellfun(@(x) cell2struct(num2cell(x), fields, 2), num2cell(mat_props
 %% Assembling for mechanics
 
 % Assembling of the elastic stiffness matrix
-[K_elast,B,WEIGHT]=ASSEMBLY.elastic_stiffness_matrix_2D(elem,coord,...
+[K_elast,B,WEIGHT,DPhi1_out,DPhi2_out]=ASSEMBLY.elastic_stiffness_matrix_2D(elem,coord,...
     DHatP1,DHatP2,WF,shear,lame);
 
 % volume forces at integration points, size(f_V_int)=(2,n_int)
 f_V_int = [-grad_p(1,:);-grad_p(2,:)-gamma] ;
 % vector of volume forces
 f_V=ASSEMBLY.vector_volume_2D(elem,coord,f_V_int,HatP,WEIGHT);
-
 
 %% Input parameters for the continuation methods
 
@@ -163,14 +190,16 @@ omega_max_stop = 7e7;           % Maximum omega, then stop
 step_max = 100;                 % Maximum number of continuation steps
 
 %% Input parameters for Newton's solvers
+
 it_newt_max = 50;               % Number of Newton's iterations
 it_damp_max = 10;               % Number of iterations within line search
 tol = 1e-4;                     % Relative tolerance for Newton's solvers
 r_min = 1e-4;                   % Basic minimal regularization of the stiffness matrix
 
 %% Defining linear solver
-agmg_folder = "agmg"; % Check for AGMG in specified folder
-solver_type = 'DIRECT'; % Type of solver: "DIRECT", "DFGMRES_ICHOL", "DFGMRES_AGMG", "DFGMRES_HYPRE_BOOMERAMG"
+
+% agmg folder is baked into LINEAR_SOLVERS.set_linear_solver
+solver_type = 'DFGMRES_HYPRE_BOOMERAMG'; % Type of solver: "DIRECT", "DFGMRES_ICHOL", "DFGMRES_AGMG", "DFGMRES_HYPRE_BOOMERAMG"
 
 linear_solver_tolerance = 1e-1;
 linear_solver_maxit = 100;
@@ -181,16 +210,28 @@ linear_solver_printing = 0;
 boomeramg_opts = struct('threads', 16, 'print_level', 0, ...
     'use_as_preconditioner', true);
 
-[linear_system_solver] = LINEAR_SOLVERS.set_linear_solver(agmg_folder, solver_type, ...
+[linear_system_solver] = LINEAR_SOLVERS.set_linear_solver(solver_type, ...
     linear_solver_tolerance, linear_solver_maxit, deflation_basis_tolerance, linear_solver_printing, Q, coord, boomeramg_opts);
 
-
 %% Constitutive problem and matrix builder
+
 dim = 2;
 n_strain = dim * (dim + 1) / 2;
 constitutive_matrix_builder = CONSTITUTIVE_PROBLEM.CONSTITUTIVE(B, c0, phi, psi, Davis_type, shear, bulk, lame, WEIGHT, n_strain, n_int, dim);
+% Enable element-level tangent assembly path for 2D B*D*B values.
+constitutive_matrix_builder.set_element_data(elem, DPhi1_out, DPhi2_out);
+disp(['2D element-level tangent mex enabled = ' , num2str(constitutive_matrix_builder.elem_use_mex)]);
+disp(['2D constitutive mex enabled = ' , num2str(constitutive_matrix_builder.use_2D_mex)]);
+
 
 %--------------------------------------------------------------------------
+
+%% Profiler Setup
+
+profiler = PROFILING.Profiler();
+constitutive_matrix_builder.profiler = profiler;
+linear_system_solver.profiler = profiler;
+
 %% Computation of the factor of safety for the SSR method
 
 direct_on = 0; % Use direct continuation method.
@@ -221,34 +262,77 @@ if ~isempty(strfind(upper(char(solver_type)), 'BOOMERAMG'))
     LINEAR_SOLVERS.hypre_boomeramg_clear();
 end
 
-%% Postprocessing - visualization of selected results for direct continuation
-if direct_on
-    VIZ.draw_heterogeneity_Luzec(coord,elem,material_identifier);
-    VIZ.draw_mesh_2D(coord,elem)
-    VIZ.plot_pore_pressure_2D(pw,coord,elem);
-    VIZ.draw_saturation_2D(coord,elem,mater_sat);
-    VIZ.plot_deviatoric_strain_2D(U2,coord,elem,B);
-    VIZ.plot_displacements_2D(U2,coord,elem);
-    % Visualization of the curve: omega -> lambda for direct continuation.
-    figure; hold on; box on; grid on;
-    plot(omega_hist2, lambda_hist2, '-o');
-    title('Direct continuation method', 'Interpreter', 'latex')
-    xlabel('variable - $\xi$', 'Interpreter', 'latex');
-    ylabel('strength reduction factor - $\lambda$', 'Interpreter', 'latex');
+%% Profiler Summary
+
+if exist('profiler', 'var')
+    profiler.print_summary();
 end
 
-%% Postprocessing - visualization of selected results for indirect continuation
-if indirect_on
-    VIZ.draw_heterogeneity_Luzec(coord,elem,material_identifier);
-    VIZ.draw_mesh_2D(coord,elem)
-    VIZ.plot_pore_pressure_2D(pw,coord,elem);
-    VIZ.draw_saturation_2D(coord,elem,mater_sat);
-    VIZ.plot_deviatoric_strain_2D(U3,coord,elem,B);
-    VIZ.plot_displacements_2D(U3,coord,elem);
-    % Visualization of the curve: omega -> lambda for indirect continuation.
-    figure; hold on; box on; grid on;
-    plot(omega_hist3, lambda_hist3, '-o');
-    title('Indirect continuation method', 'Interpreter', 'latex')
-    xlabel('control variable - $\omega$', 'Interpreter', 'latex');
-    ylabel('strength reduction factor - $\lambda$', 'Interpreter', 'latex');
+%% Unified Postprocessing via SolutionPlotter
+
+plotter = VIZ.SolutionPlotter(coord, elem, [], B, [], 'comsol');
+
+if exist('material_identifier', 'var')
+    plotter.set_material_identifier(material_identifier);
+end
+if exist('mater_sat', 'var')
+    plotter.set_element_saturation(mater_sat);
+end
+if exist('pw', 'var')
+    plotter.set_pore_pressure(pw);
+end
+
+if exist('U2', 'var') && exist('lambda_hist2', 'var') && exist('omega_hist2', 'var')
+    if exist('Umax_hist2', 'var')
+        Umax2 = Umax_hist2;
+    else
+        Umax2 = [];
+    end
+    plotter.add_solution('direct', U2, lambda_hist2, omega_hist2, Umax2, struct( ...
+        'title', 'Direct continuation method', ...
+        'xlabel', 'Control variable - $\omega$', ...
+        'ylabel', 'strength reduction factor - $\lambda$', ...
+        'marker', '-o'));
+end
+
+if exist('U3', 'var') && exist('lambda_hist3', 'var') && exist('omega_hist3', 'var')
+    if exist('Umax_hist3', 'var')
+        Umax3 = Umax_hist3;
+    else
+        Umax3 = [];
+    end
+    plotter.add_solution('indirect', U3, lambda_hist3, omega_hist3, Umax3, struct( ...
+        'title', 'Indirect continuation method', ...
+        'xlabel', 'Control variable - $\omega$', ...
+        'ylabel', 'strength reduction factor - $\lambda$', ...
+        'marker', '-o'));
+end
+
+if exist('U', 'var') && exist('t_hist', 'var') && exist('omega_hist', 'var')
+    if exist('U_max_hist', 'var')
+        UmaxLL = U_max_hist;
+    else
+        UmaxLL = [];
+    end
+    plotter.add_solution('indirect_LL', U, t_hist, omega_hist, UmaxLL, struct( ...
+        'title', 'Indirect continuation method for the LL method', ...
+        'xlabel', 'Control variable - $\omega$', ...
+        'ylabel', 'Load factor - $t$', ...
+        'marker', '-o'));
+end
+
+if plotter.n_solutions > 0
+    plotter.plot_deviatoric_strain();
+    plotter.plot_displacements();
+    plotter.plot_convergence();
+end
+
+if exist('pw', 'var')
+    plotter.plot_pore_pressure();
+end
+if exist('material_identifier', 'var')
+    plotter.plot_material_map();
+end
+if exist('mater_sat', 'var')
+    plotter.plot_saturation();
 end
