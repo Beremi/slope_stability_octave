@@ -29,7 +29,7 @@ function [U_it, flag_N, it, history] = newton(U_ini, tol, it_newt_max, it_damp_m
 %   U_it    - Computed displacement field approximating the solution.
 %   flag_N  - Newton solver flag: 0 if converged, 1 if not converged.
 %   it      - Number of Newton iterations performed.
-%   history - Struct with timing profile (same fields as newton_ind_SSR).
+%   history - Struct (currently empty; timing is handled by PROFILING.Profiler).
 %--------------------------------------------------------------------------
 %
 % Initialization.
@@ -41,6 +41,7 @@ it = 0;                       % Iteration counter.
 flag_N = 0;                   % Convergence flag.
 r = r_min;                    % Regularization parameter.
 compute_diffs = 1;            % Flag: must recompute stress/tangent?
+norm_f = norm(f(Q));
 
 % Ensure pattern is initialised.
 if ~constitutive_matrix_builder.pattern_initialized
@@ -48,15 +49,26 @@ if ~constitutive_matrix_builder.pattern_initialized
 end
 n_Q = constitutive_matrix_builder.n_Q;
 
-% Timing accumulators.
-t_build_F_and_DS = 0;
-t_K_r_assembly   = 0;
-t_sparsersb_build = 0;
-t_setup_preconditioner = 0;
-t_A_orthogonalize = 0;
-t_solve = 0;
-t_damping = 0;
-t_expand_deflation = 0;
+% Precompute upper-triangle mask for sparsersb "unique","sym" constructor.
+upper_mask = (constitutive_matrix_builder.ref_I <= constitutive_matrix_builder.ref_J);
+K_I_sym = constitutive_matrix_builder.ref_I(upper_mask);
+K_J_sym = constitutive_matrix_builder.ref_J(upper_mask);
+
+% IJV preconditioner path (available for HYPRE BoomerAMG only).
+can_reuse_ijv = ~isempty(linear_system_solver.preconditioner_initializator) && ...
+                ~isempty(linear_system_solver.preconditioner_updater);
+ijv_pattern_initialized = false;
+
+% Preallocate history arrays.
+residual_history = nan(1, it_newt_max);
+r_history = nan(1, it_newt_max);
+alpha_history = nan(1, it_newt_max);
+rel_resid = NaN;
+alpha = NaN;
+status_msg = 'unknown';
+last_progress_chars = 0;
+linear_iters_total = 0;
+t_newton_start = tic;
 
 % Newton's iteration loop.
 while true
@@ -65,45 +77,45 @@ while true
 
     % Compute internal force and tangent moduli.
     if compute_diffs
-        t_tmp = tic;
         F = constitutive_matrix_builder.build_F_and_DS_reduced(U_it);
-        t_build_F_and_DS = t_build_F_and_DS + toc(t_tmp);
+        criterion = norm(F(Q) - f(Q));
+        rel_resid = criterion / norm_f;
+        residual_history(it) = rel_resid;
+        if (rel_resid < tol)
+            status_msg = 'converged';
+            break;
+        end
     end
 
-    % Compute relative residual criterion.
-    criterion = norm(F(Q) - f(Q)) / norm(f(Q));
-    if (criterion < tol)
-        fprintf('Newton method converges: iteration = %d, stopping criterion = %e\n', it, criterion);
-        break;
-    end
+    r_history(it) = r;
 
     % Build K_r(Q,Q) as [I, J, V] triplets  →  sparsersb.
-    t_tmp = tic;
     [K_I, K_J, K_V] = constitutive_matrix_builder.build_K_r_QQ_vals(r);
-    t_K_r_assembly = t_K_r_assembly + toc(t_tmp);
 
-    t_tmp = tic;
-    K_rQQ = sparsersb(K_I, K_J, K_V, n_Q, n_Q);
-    t_sparsersb_build = t_sparsersb_build + toc(t_tmp);
+    K_rQQ = sparsersb(K_I_sym, K_J_sym, K_V(upper_mask), n_Q, n_Q, "unique", "sym");
 
-    % Setup preconditioner  (HYPRE reuses pattern automatically on same instance).
-    t_tmp = tic;
-    linear_system_solver.setup_preconditioner_ijv(K_I, K_J, K_V, n_Q);
-    t_setup_preconditioner = t_setup_preconditioner + toc(t_tmp);
+    % Setup preconditioner from IJV when available, otherwise fallback to A-based setup.
+    if can_reuse_ijv
+        if ~ijv_pattern_initialized
+            linear_system_solver.setup_preconditioner_ijv(K_I, K_J, K_V, n_Q);
+            ijv_pattern_initialized = true;
+        else
+            linear_system_solver.update_preconditioner_values(K_V);
+        end
+    else
+        linear_system_solver.setup_preconditioner(K_rQQ);
+    end
 
-    t_tmp = tic;
     linear_system_solver.A_orthogonalize(K_rQQ);
-    t_A_orthogonalize = t_A_orthogonalize + toc(t_tmp);
 
     % Solve for the Newton increment.
-    t_tmp = tic;
-    dU(Q) = linear_system_solver.solve(K_rQQ, f(Q) - F(Q));
-    t_solve = t_solve + toc(t_tmp);
+    [dU_Q, lin_it] = linear_system_solver.solve(K_rQQ, f(Q) - F(Q));
+    dU(Q) = dU_Q;
+    linear_iters_total = linear_iters_total + lin_it;
 
     % Determine damping factor via line search.
-    t_tmp = tic;
     alpha = NEWTON.damping(it_damp_max, U_it, dU, F, f, constitutive_matrix_builder);
-    t_damping = t_damping + toc(t_tmp);
+    alpha_history(it) = alpha;
 
     % Regularization adjustments based on alpha.
     compute_diffs = 1;
@@ -116,43 +128,65 @@ while true
         end
     else
         % Expand deflation basis with the computed increment.
-        t_tmp = tic;
         linear_system_solver.expand_deflation_basis(dU(Q));
-        t_expand_deflation = t_expand_deflation + toc(t_tmp);
         if alpha > 0.5
             r = max(r / sqrt(2), r_min);
         end
     end
 
     if (alpha == 0) && (r > 1)
-        fprintf('\nNewton solver does not converge: stopping criterion = %e\n', criterion);
-        flag_N = 1;
+        status_msg = 'stalled_regularization';
+        if rel_resid > 10 * tol
+            flag_N = 1;
+        end
         break;
     end
 
     % Update displacement.
     U_it = U_it + alpha * dU;
 
-    fprintf('  newton it=%d  resid=%.2e  alpha=%.2f  r=%.3g  step_time=%.2f s\n', ...
-        it, criterion, alpha, r, toc(t_step));
+    progress_line = sprintf('  newton it=%d  rel_resid=%.2e  alpha=%.2f  r=%.3g  lin_it=%d  step_time=%.2f s', ...
+        it, rel_resid, alpha, r, lin_it, toc(t_step));
+    last_progress_chars = local_print_progress(progress_line, last_progress_chars);
 
     % Check for divergence or maximum iterations.
-    if isnan(criterion) || (it == it_newt_max)
-        flag_N = 1;
-        fprintf('Newton solver does not converge: stopping criterion = %e\n', criterion);
+    if isnan(rel_resid) || (it == it_newt_max)
+        if rel_resid > 10 * tol
+            flag_N = 1;
+        end
+        if isnan(rel_resid)
+            status_msg = 'nan_residual';
+        else
+            status_msg = 'max_iterations';
+        end
         break;
     end
 
 end % while
 
-% Build timing profile.
-history.timing.build_F_and_DS       = t_build_F_and_DS;
-history.timing.K_r_assembly         = t_K_r_assembly;
-history.timing.sparsersb_build      = t_sparsersb_build;
-history.timing.setup_preconditioner = t_setup_preconditioner;
-history.timing.A_orthogonalize      = t_A_orthogonalize;
-history.timing.solve                = t_solve;
-history.timing.damping              = t_damping;
-history.timing.expand_deflation     = t_expand_deflation;
+newton_wall_time = toc(t_newton_start);
+local_finish_progress(last_progress_chars);
+fprintf('newton summary: status=%s, it=%d, rel_resid=%e, lin_it_total=%d, wall_time=%.2f s\n', ...
+    status_msg, it, rel_resid, linear_iters_total, newton_wall_time);
+
+% Build output history.
+history.residual = residual_history(1:it);
+history.r = r_history(1:it);
+history.alpha = alpha_history(1:it);
+history.linear_iters_total = linear_iters_total;
+history.wall_time = newton_wall_time;
 
 end % function
+
+function last_chars = local_print_progress(msg, last_chars)
+pad = max(0, last_chars - numel(msg));
+fprintf('\r%s%s', msg, repmat(' ', 1, pad));
+fflush(stdout);
+last_chars = numel(msg);
+end
+
+function local_finish_progress(last_chars)
+if last_chars > 0
+    fprintf('\r%s\r', repmat(' ', 1, last_chars));
+end
+end

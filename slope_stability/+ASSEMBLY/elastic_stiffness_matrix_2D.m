@@ -1,5 +1,5 @@
 
-function  [K,B,WEIGHT]=elastic_stiffness_matrix_2D(ELEM,COORD,...
+function  [K,B,WEIGHT,DPhi1,DPhi2]=elastic_stiffness_matrix_2D(ELEM,COORD,...
                                                DHatP1,DHatP2,WF,shear,lame)
  
 % =========================================================================
@@ -25,6 +25,8 @@ function  [K,B,WEIGHT]=elastic_stiffness_matrix_2D(ELEM,COORD,...
 %    B - the strain-displacement matrix, size(B)=(3*n_int,2*n_n)
 %    WEIGHT - the weight coefficients for each quadrature point, 
 %             size(WEIGHT)=(1, n_int)
+%    DPhi1, DPhi2 - basis derivatives in x1/x2 at integration points,
+%                   size(DPhi1)=size(DPhi2)=(n_p, n_int)
 %
 % ======================================================================
 %

@@ -1,69 +1,100 @@
 function [pw, grad_p, mater_sat]=seepage_problem_3D...
-           (coord,elem,Q_w,pw_D,grho,conduct0,HatP,DHatP1,DHatP2,DHatP3,WF)
+    (coord,elem,Q_w,pw_D,grho,conduct0,HatP,DHatP1,DHatP2,DHatP3,WF,linear_system_solver)
 
-  
-  % number of nodes, elements, etc.
-  n_e=size(elem,2);           % number of elements
-  dim = size(coord, 1);         % Spatial dimension (2D or 3D).
-  n_n=size(coord,2);          % number of nodes
-  n_q=length(WF);             % number of quadratic points
-  n_int = n_e*n_q ;           % total number of integrations points 
-  n_p=size(elem,1);           % number of nodes per element
+if nargin < 12 || isempty(linear_system_solver)
+    linear_system_solver = local_default_hypre_solver(Q_w, coord);
+end
 
-  % penalty parameter dependent on the element size
-  eps=SEEPAGE.penalty_parameters_3D(coord,elem);
+% number of nodes, elements, etc.
+n_e=size(elem,2);           % number of elements
+dim = size(coord, 1);         % Spatial dimension (2D or 3D).
+n_n=size(coord,2);          % number of nodes
+n_q=length(WF);             % number of quadratic points
+n_int = n_e*n_q ;           % total number of integrations points
+n_p=size(elem,1);           % number of nodes per element
 
-  % values of the penalization parameter at integration points
-  eps_int=kron(eps,ones(1,n_q));
+% penalty parameter dependent on the element size
+eps=SEEPAGE.penalty_parameters_3D(coord,elem);
 
-  % assembling of auxilliary matrices
-  [Bw,C,weight]=SEEPAGE.auxiliary_matrices_3D...
-                                 (elem,coord,HatP,DHatP1,DHatP2,DHatP3,WF);  
- 
-  % assembling of the constitutive matrix D, size(D)=(3*n_int, 3*n_int)
-  wc=weight.*conduct0; 
-  vD=[1;0;0;0;1;0;0;0;1]*wc; % size(vD)=(9, n_int) 
-  AUX=reshape(1:3*n_int,3,n_int);
-  iD=repmat(AUX,3,1); 
-  jD=kron(AUX,ones(3,1));
-  D=sparse(iD,jD,vD);
-  
-  % flow stiffness matrix: size(K_D)=(n_n, n_n)
-  K_D = Bw'*D*Bw;     
-  
-  % the right-hand side vector
-  % wc3=[wc; wc; wc];
-  % q1=Bw*pw_D'; 
-  % f=-Bw'*(wc3(:).*q1);
+% values of the penalization parameter at integration points
+eps_int=kron(eps,ones(1,n_q));
 
-  wc2=repmat(wc,dim,1);
-  q1=Bw*pw_D'; q2=Bw*coord(2,:)';
-  q3=q1+grho*q2;
-  f=-Bw'*(wc2(:).*q3);
-  
-  % initialization of the pressure field
-  pw_0=zeros(1,n_n);
-  pw_0(Q_w)=K_D(Q_w,Q_w)\f(Q_w);
-  pw_init=pw_0+pw_D;
+% assembling of auxilliary matrices
+[Bw,C,weight]=SEEPAGE.auxiliary_matrices_3D...
+    (elem,coord,HatP,DHatP1,DHatP2,DHatP3,WF);
 
-  % Newton's solver
-  it_max=50; % maximal number of iterations
-  tol=1e-10; % relative tolerance for the Newton solver
-  pw=SEEPAGE.newton_flow(pw_init,conduct0,Q_w,weight,Bw,C,K_D,wc,...
-            elem,coord,HatP,WF,eps_int,grho,it_max,tol);   
+% assembling of the constitutive matrix D, size(D)=(3*n_int, 3*n_int)
+wc=weight.*conduct0;
+vD=[1;0;0;0;1;0;0;0;1]*wc; % size(vD)=(9, n_int)
+AUX=reshape(1:3*n_int,3,n_int);
+iD=repmat(AUX,3,1);
+jD=kron(AUX,ones(3,1));
+D=sparse(iD,jD,vD);
 
-  % Remaining output arrays
-  grad_p=reshape(Bw*pw',3,n_int);
-  pw_e=reshape(pw(elem(:)),n_p,n_e);
-  pw_int=sum(repmat(HatP,1,n_e).*kron(pw_e,ones(1,n_q)));
-  if n_q>1
+% flow stiffness matrix: size(K_D)=(n_n, n_n)
+K_D = Bw'*D*Bw;
+
+% the right-hand side vector
+% wc3=[wc; wc; wc];
+% q1=Bw*pw_D';
+% f=-Bw'*(wc3(:).*q1);
+
+wc2=repmat(wc,dim,1);
+q1=Bw*pw_D'; q2=Bw*coord(2,:)';
+q3=q1+grho*q2;
+f=-Bw'*(wc2(:).*q3);
+
+% initialization of the pressure field
+pw_0=zeros(1,n_n);
+K_QQ = K_D(Q_w,Q_w);
+pw_0(Q_w)=local_solve_linear_system(linear_system_solver, K_QQ, f(Q_w));
+pw_init=pw_0+pw_D;
+
+% Newton's solver
+it_max=50; % maximal number of iterations
+tol=1e-10; % relative tolerance for the Newton solver
+pw=SEEPAGE.newton_flow(pw_init,conduct0,Q_w,weight,Bw,C,K_D,wc,...
+    elem,coord,HatP,WF,eps_int,grho,it_max,tol,linear_system_solver);
+
+% Remaining output arrays
+grad_p=reshape(Bw*pw',3,n_int);
+pw_e=reshape(pw(elem(:)),n_p,n_e);
+pw_int=sum(repmat(HatP,1,n_e).*kron(pw_e,ones(1,n_q)));
+if n_q>1
     int_pw_e=sum(reshape(pw_int.*weight,n_q,n_e));
     int_e=sum(reshape(weight,n_q,n_e));
     pw_aver_e=int_pw_e./int_e;
-  else
+else
     pw_aver_e=pw_int;
-  end
-  mater_sat=false(1,n_e);
-  mater_sat(pw_aver_e>=0.1*eps)=1;    
-                   
+end
+mater_sat=false(1,n_e);
+mater_sat(pw_aver_e>=0.1*eps)=1;
+
+end
+
+function x = local_solve_linear_system(linear_system_solver, A, b)
+n = size(A, 1);
+can_reuse_ijv = ~isempty(linear_system_solver.preconditioner_initializator) && ...
+    ~isempty(linear_system_solver.preconditioner_updater);
+if can_reuse_ijv
+    [Ai, Aj, Av] = find(A);
+    linear_system_solver.setup_preconditioner_ijv(Ai, Aj, Av, n);
+else
+    linear_system_solver.setup_preconditioner(A);
+end
+linear_system_solver.A_orthogonalize(A);
+[x, ~] = linear_system_solver.solve(A, b);
+end
+
+function linear_system_solver = local_default_hypre_solver(Q_w, coord)
+solver_type = 'DFGMRES_HYPRE_BOOMERAMG';
+linear_solver_tolerance = 1e-8;
+linear_solver_maxit = 400;
+deflation_basis_tolerance = 1e-8;
+linear_solver_printing = 0;
+boomeramg_opts = struct('threads', 16, 'print_level', 0, ...
+    'use_as_preconditioner', true);
+linear_system_solver = LINEAR_SOLVERS.set_linear_solver(solver_type, ...
+    linear_solver_tolerance, linear_solver_maxit, ...
+    deflation_basis_tolerance, linear_solver_printing, Q_w, coord, boomeramg_opts);
 end

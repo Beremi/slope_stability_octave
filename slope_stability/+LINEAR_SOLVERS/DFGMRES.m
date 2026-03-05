@@ -5,7 +5,7 @@ classdef DFGMRES < handle
     % This class solves linear systems using a flexible GMRES method that
     % incorporates deflation of the Krylov subspace. It uses a provided
     % preconditioner builder to construct the preconditioner, and collects
-    % iteration and timing data through an IterationCollector.
+    % profiling data through the optional PROFILING.Profiler handle.
     %
     % PROPERTIES:
     %   deflation_basis         - Matrix whose columns form the deflation basis.
@@ -15,8 +15,6 @@ classdef DFGMRES < handle
     %   max_iterations          - Maximum number of iterations allowed.
     %   tolerance_deflation_basis - Tolerance for orthogonalizing the deflation basis.
     %   verbose                 - Flag for verbose output.
-    %   iteration_collector     - Shared IterationCollector object for storing solver metrics.
-    %   instance_id             - Unique instance identifier registered in the iteration_collector.
     %
     % METHODS:
     %   DFGMRES                 - Constructor.
@@ -36,16 +34,14 @@ classdef DFGMRES < handle
         max_iterations
         tolerance_deflation_basis
         verbose
-        iteration_collector  % Shared among all copies.
-        instance_id          % Unique ID in iteration_collector.
 
         % IJV pattern-reuse preconditioner support (optional, set by set_linear_solver)
         preconditioner_initializator   % @(I,J,V,n) -> prec_handle  (first setup from triplets)
         preconditioner_updater         % @(V) -> void               (value-only update)
         preconditioner_apply_handle    % @(x) -> y                  (apply, stays same after update)
 
-        % Per-solve timing breakdown (set by solve_core, read by caller)
-        last_solve_timing              % struct with t_precond, t_matvec, t_ortho, etc.
+        % Optional profiler (PROFILING.Profiler handle, [] = disabled)
+        profiler
     end
 
     methods
@@ -72,14 +68,10 @@ classdef DFGMRES < handle
             obj.tolerance_deflation_basis = tolerance_deflation_basis;
             obj.verbose = verbose;
 
-            % Initialize the iteration collector and register this instance.
-            obj.iteration_collector = LINEAR_SOLVERS.IterationCollector();
-            obj.instance_id = obj.iteration_collector.register_instance();
-
             obj.preconditioner_initializator = [];
             obj.preconditioner_updater = [];
             obj.preconditioner_apply_handle = [];
-            obj.last_solve_timing = struct();
+            obj.profiler = [];
         end
 
         function obj = setup_preconditioner(obj, A)
@@ -102,25 +94,24 @@ classdef DFGMRES < handle
             t_start = tic;
             obj.preconditioner = obj.setup_preconditioner_core(A);
             elapsed_time = toc(t_start);
-            obj.iteration_collector.store_preconditioner_time(obj.instance_id, elapsed_time);
+            if ~isempty(obj.profiler), obj.profiler.add_time('DFGMRES.setup_preconditioner', elapsed_time); end
         end
-
+        %--------------------------------------------------------------------------
+        % setup_preconditioner_core builds a preconditioner for matrix A.
+        %
+        %   preconditioner = obj.setup_preconditioner_core(A)
+        %
+        % This internal method applies the preconditioner_builder to the given
+        % matrix A to construct a preconditioner. This method encapsulates the
+        % preconditioner construction logic.
+        %
+        % INPUT:
+        %   A - Matrix for which the preconditioner is to be constructed.
+        %
+        % OUTPUT:
+        %   preconditioner - The preconditioner for matrix A.
+        %--------------------------------------------------------------------------
         function preconditioner = setup_preconditioner_core(obj, A)
-            %--------------------------------------------------------------------------
-            % setup_preconditioner_core builds a preconditioner for matrix A.
-            %
-            %   preconditioner = obj.setup_preconditioner_core(A)
-            %
-            % This internal method applies the preconditioner_builder to the given
-            % matrix A to construct a preconditioner. This method encapsulates the
-            % preconditioner construction logic.
-            %
-            % INPUT:
-            %   A - Matrix for which the preconditioner is to be constructed.
-            %
-            % OUTPUT:
-            %   preconditioner - The preconditioner for matrix A.
-            %--------------------------------------------------------------------------
             preconditioner = obj.preconditioner_builder(A);
         end
 
@@ -137,28 +128,22 @@ classdef DFGMRES < handle
             t_start = tic;
             obj.deflation_basis = LINEAR_SOLVERS.A_orthogonalize(obj.deflation_basis, A, obj.tolerance_deflation_basis);
             elapsed_time = toc(t_start);
-            obj.iteration_collector.store_orthogonalization_time(obj.instance_id, elapsed_time);
+            if ~isempty(obj.profiler), obj.profiler.add_time('DFGMRES.A_orthogonalize', elapsed_time); end
         end
 
-        function [u] = solve(obj, A, b)
+        function [u, nit] = solve(obj, A, b)
             %--------------------------------------------------------------------------
             % solve computes the solution u of the linear system A*u = b.
             %
-            %   u = obj.solve(A, b)
+            %   [u, nit] = obj.solve(A, b)
             %
             % This method wraps the core flexible GMRES solver, records the number
-            % of iterations and time taken, and optionally prints verbose output.
-            % After return, obj.last_solve_timing holds per-section breakdown.
+            % of iterations and time taken.
             %--------------------------------------------------------------------------
-            obj.last_solve_timing = struct();   % clear before call
             t_start = tic;
             [u, nit] = obj.solve_core(A, b);
             elapsed_time = toc(t_start);
-            obj.iteration_collector.store_iteration(obj.instance_id, nit, elapsed_time);
-
-            if obj.verbose
-                fprintf('%d|', nit);
-            end
+            if ~isempty(obj.profiler), obj.profiler.add_time('DFGMRES.solve', elapsed_time); end
         end
 
         function [u, nit] = solve_core(obj, A, b)
@@ -168,20 +153,20 @@ classdef DFGMRES < handle
             %   [u, nit] = obj.solve_core(A, b)
             %
             % It calls the function flexible_GMRES_deflate from the LINEAR_SOLVERS
-            % package with the provided parameters.  Per-section timing is
-            % stored in obj.last_solve_timing.
+            % package with the provided parameters.
             %--------------------------------------------------------------------------
-            [u, nit, ~, solve_timing] = LINEAR_SOLVERS.dfgmres_solver(A, b, ...
+            [u, nit, ~] = LINEAR_SOLVERS.dfgmres_solver(A, b, ...
                 obj.preconditioner, obj.deflation_basis, ...
-                obj.max_iterations, obj.tolerance, []);
-            obj.last_solve_timing = solve_timing;
+                obj.max_iterations, obj.tolerance, [], obj.profiler);
         end
 
         function obj = expand_deflation_basis(obj, additional_vectors)
             %--------------------------------------------------------------------------
             % expand_deflation_basis adds new vectors to the deflation basis.
             %--------------------------------------------------------------------------
+            t_start = tic;
             obj.deflation_basis = [obj.deflation_basis, additional_vectors];
+            if ~isempty(obj.profiler), obj.profiler.add_time('DFGMRES.expand_deflation_basis', toc(t_start)); end
         end
 
         function obj = setup_preconditioner_ijv(obj, I, J, V, n)
@@ -198,7 +183,7 @@ classdef DFGMRES < handle
             obj.preconditioner_apply_handle = obj.preconditioner_initializator(I, J, V, n);
             obj.preconditioner = obj.preconditioner_apply_handle;
             elapsed_time = toc(t_start);
-            obj.iteration_collector.store_preconditioner_time(obj.instance_id, elapsed_time);
+            if ~isempty(obj.profiler), obj.profiler.add_time('DFGMRES.setup_preconditioner', elapsed_time); end
         end
 
         function obj = update_preconditioner_values(obj, V)
@@ -213,7 +198,7 @@ classdef DFGMRES < handle
             t_start = tic;
             obj.preconditioner_updater(V);
             elapsed_time = toc(t_start);
-            obj.iteration_collector.store_preconditioner_time(obj.instance_id, elapsed_time);
+            if ~isempty(obj.profiler), obj.profiler.add_time('DFGMRES.update_preconditioner', elapsed_time); end
         end
 
         function new_obj = copy(obj)
@@ -229,12 +214,10 @@ classdef DFGMRES < handle
                 obj.max_iterations, obj.tolerance_deflation_basis, obj.verbose);
             new_obj.deflation_basis = obj.deflation_basis;
             new_obj.preconditioner = obj.preconditioner;
-            new_obj.iteration_collector = obj.iteration_collector;
-            new_obj.instance_id = obj.iteration_collector.register_instance();
             new_obj.preconditioner_initializator = obj.preconditioner_initializator;
             new_obj.preconditioner_updater = obj.preconditioner_updater;
             new_obj.preconditioner_apply_handle = obj.preconditioner_apply_handle;
-            new_obj.last_solve_timing = struct();
+            new_obj.profiler = obj.profiler;  % shared handle
         end
     end
 end

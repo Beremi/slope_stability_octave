@@ -52,20 +52,12 @@ t_total = tic;
 
 stats = struct();
 stats.init_newton_iterations = [];
-stats.init_linear_iterations = 0;
-stats.init_linear_solve_time = 0;
-stats.init_linear_preconditioner_time = 0;
-stats.init_linear_orthogonalization_time = 0;
 stats.attempt_step = [];
 stats.attempt_success = [];
 stats.attempt_wall_time = [];
 stats.attempt_newton_iterations = [];
 stats.attempt_newton_flag = [];
 stats.attempt_newton_relres_end = [];
-stats.attempt_linear_iterations = [];
-stats.attempt_linear_solve_time = [];
-stats.attempt_linear_preconditioner_time = [];
-stats.attempt_linear_orthogonalization_time = [];
 stats.attempt_omega_target = [];
 stats.attempt_lambda_before = [];
 stats.attempt_lambda_after = [];
@@ -75,69 +67,20 @@ stats.step_wall_time = [];
 stats.step_newton_iterations = [];
 stats.step_newton_iterations_total = [];
 stats.step_newton_relres_end = [];
-stats.step_linear_iterations = [];
-stats.step_linear_solve_time = [];
-stats.step_linear_preconditioner_time = [];
-stats.step_linear_orthogonalization_time = [];
 stats.step_lambda = [];
 stats.step_omega = [];
 stats.total_wall_time = 0;
-
-% Accumulated Newton profiling timings
-stats.newton_timing.build_F_and_DS      = 0;
-stats.newton_timing.solve_V             = 0;
-stats.newton_timing.A_orthogonalize     = 0;
-stats.newton_timing.damping             = 0;
-stats.newton_timing.setup_preconditioner = 0;
-stats.newton_timing.build_F_eps         = 0;
-stats.newton_timing.solve_W             = 0;
-stats.newton_timing.K_r_assembly        = 0;
-stats.newton_timing.sparsersb_build     = 0;
-stats.newton_timing.expand_deflation_W  = 0;
-stats.newton_timing.expand_deflation_V  = 0;
-
-% Sub-profiling: build_F_and_DS_all breakdown
-stats.newton_timing.build_F_DS__reduction      = 0;
-stats.newton_timing.build_F_DS__stress_tangent = 0;
-stats.newton_timing.build_F_DS__build_F        = 0;
-stats.newton_timing.build_F_DS__n_calls        = 0;
-
-% Sub-profiling: damping_ALG5 breakdown
-stats.newton_timing.damping__build_F = 0;
-stats.newton_timing.damping__norm    = 0;
-stats.newton_timing.damping__n_iters = 0;
-stats.newton_timing.damping__n_calls = 0;
-
-% Sub-profiling: dfgmres_solver breakdown (V + W combined)
-stats.newton_timing.solve__precond       = 0;
-stats.newton_timing.solve__project       = 0;
-stats.newton_timing.solve__matvec        = 0;
-stats.newton_timing.solve__ortho         = 0;
-stats.newton_timing.solve__leastsq       = 0;
-stats.newton_timing.solve__init          = 0;
-stats.newton_timing.solve__reconstruct   = 0;
-stats.newton_timing.solve__n_gmres_iters = 0;
-stats.newton_timing.solve__n_matvecs     = 0;
-stats.newton_timing.solve__n_prec_applies = 0;
-stats.newton_timing.solve__n_calls       = 0;
 
 lambda_hist = zeros(1, 1000);    % History of lambda values.
 omega_hist = zeros(1, 1000);     % History of omega values.
 Umax_hist  = zeros(1, 1000);      % History of maximum displacement values.
 
 % First two steps of the continuation method.
-snap_init_0 = local_collector_snapshot(linear_system_solver);
 [U_old, U, omega_old, omega, lambda_old, lambda, init_newton_its] = CONTINUATION.init_phase_SSR_indirect_continuation(...
     lambda_init, d_lambda_init, d_lambda_min, ...
     it_newt_max, it_damp_max, tol, r_min, K_elast, Q, f, ...
     constitutive_matrix_builder, linear_system_solver.copy());
-snap_init_1 = local_collector_snapshot(linear_system_solver);
-delta_init = local_collector_delta(snap_init_0, snap_init_1);
 stats.init_newton_iterations = init_newton_its;
-stats.init_linear_iterations = delta_init.iterations;
-stats.init_linear_solve_time = delta_init.solve_time;
-stats.init_linear_preconditioner_time = delta_init.preconditioner_time;
-stats.init_linear_orthogonalization_time = delta_init.orthogonalization_time;
 
 linear_system_solver.expand_deflation_basis(U_old(Q));
 
@@ -164,20 +107,13 @@ step = 2;            % Number of continuation steps.
 n_omega = 0;         % Number of reductions of omega.
 n_omega_max = 5;     % Maximal number of reductions of omega.
 step_wall_accum = 0;
-step_lin_it_accum = 0;
-step_lin_solve_accum = 0;
-step_lin_prec_accum = 0;
-step_lin_orth_accum = 0;
 step_newton_it_accum = 0;
 step_attempt_count = 0;
 while true
-    fprintf('\n');
-    fprintf(' Step = %d\n', step + 1);
-    fprintf('\n');
-
     % Update of the parameter omega.
     omega_it = min(omega + d_omega, omega_max_stop);
     d_omega = omega_it - omega;
+    fprintf('Step %d: omega_target=%.6g, d_omega=%.6g\n', step + 1, omega_it, d_omega);
 
     % Initial estimate of the displacement field by linear extrapolation.
     U_ini = d_omega * (U - U_old) / (omega - omega_old) + U;
@@ -185,12 +121,9 @@ while true
     % Solvers for the system F_lambda(U) = f, f'*U = omega_it.
     % a) Newton's method
     t_attempt = tic;
-    snap_0 = local_collector_snapshot(linear_system_solver);
     [U_it, lambda_it, flag, it_newt, history] = NEWTON.newton_ind_SSR(U_ini, omega_it, lambda, ...
         it_newt_max, it_damp_max, tol, r_min, K_elast, Q, f, ...
         constitutive_matrix_builder, linear_system_solver.copy());
-    snap_1 = local_collector_snapshot(linear_system_solver);
-    delta_attempt = local_collector_delta(snap_0, snap_1);
     attempt_wall = toc(t_attempt);
 
     attempt_relres = NaN;
@@ -204,20 +137,9 @@ while true
     stats.attempt_newton_iterations(end + 1, 1) = it_newt;
     stats.attempt_newton_flag(end + 1, 1) = flag;
     stats.attempt_newton_relres_end(end + 1, 1) = attempt_relres;
-    stats.attempt_linear_iterations(end + 1, 1) = delta_attempt.iterations;
-    stats.attempt_linear_solve_time(end + 1, 1) = delta_attempt.solve_time;
-    stats.attempt_linear_preconditioner_time(end + 1, 1) = delta_attempt.preconditioner_time;
-    stats.attempt_linear_orthogonalization_time(end + 1, 1) = delta_attempt.orthogonalization_time;
     stats.attempt_omega_target(end + 1, 1) = omega_it;
     stats.attempt_lambda_before(end + 1, 1) = lambda;
 
-    % Accumulate Newton profiling timings
-    if isfield(history, 'timing')
-        fnames = fieldnames(history.timing);
-        for fi = 1:numel(fnames)
-            stats.newton_timing.(fnames{fi}) = stats.newton_timing.(fnames{fi}) + history.timing.(fnames{fi});
-        end
-    end
     if flag == 0
         stats.attempt_lambda_after(end + 1, 1) = lambda_it;
     else
@@ -225,10 +147,6 @@ while true
     end
 
     step_wall_accum = step_wall_accum + attempt_wall;
-    step_lin_it_accum = step_lin_it_accum + delta_attempt.iterations;
-    step_lin_solve_accum = step_lin_solve_accum + delta_attempt.solve_time;
-    step_lin_prec_accum = step_lin_prec_accum + delta_attempt.preconditioner_time;
-    step_lin_orth_accum = step_lin_orth_accum + delta_attempt.orthogonalization_time;
     step_newton_it_accum = step_newton_it_accum + it_newt;
     step_attempt_count = step_attempt_count + 1;
 
@@ -244,6 +162,7 @@ while true
 
     % Evaluation of the solver and update.
     if flag == 1  % Solver was not successful.
+        fprintf('  retry: reducing d_omega from %.6g to %.6g\n', d_omega, d_omega / 2);
         d_omega = d_omega / 2;
         n_omega = n_omega + 1;
     else        % Solver was successful.
@@ -268,36 +187,26 @@ while true
         stats.step_newton_iterations(end + 1, 1) = it_newt;
         stats.step_newton_iterations_total(end + 1, 1) = step_newton_it_accum;
         stats.step_newton_relres_end(end + 1, 1) = attempt_relres;
-        stats.step_linear_iterations(end + 1, 1) = step_lin_it_accum;
-        stats.step_linear_solve_time(end + 1, 1) = step_lin_solve_accum;
-        stats.step_linear_preconditioner_time(end + 1, 1) = step_lin_prec_accum;
-        stats.step_linear_orthogonalization_time(end + 1, 1) = step_lin_orth_accum;
         stats.step_lambda(end + 1, 1) = lambda;
         stats.step_omega(end + 1, 1) = omega;
 
         step_wall_accum = 0;
-        step_lin_it_accum = 0;
-        step_lin_solve_accum = 0;
-        step_lin_prec_accum = 0;
-        step_lin_orth_accum = 0;
         step_newton_it_accum = 0;
         step_attempt_count = 0;
 
         % Display.
-        disp(['   lambda = ', num2str(lambda), ...
-            ', d_lambda = ', num2str(d_lambda), ...
-            ', d_lambda_diff_scaled = ', num2str(d_lambda / d_omega * (omega_hist(step) - omega_hist(1))), ...
-            ', omega = ', num2str(omega), ...
-            ', d_omega = ', num2str(d_omega), ...
-            ', U_max = ', num2str(Umax_hist(step))]);
+        fprintf(['  accepted: lambda=%.6g, d_lambda=%.6g, d_lambda_diff_scaled=%.6g, ', ...
+            'omega=%.6g, d_omega=%.6g, U_max=%.6g\n'], ...
+            lambda, d_lambda, d_lambda / d_omega * (omega_hist(step) - omega_hist(1)), ...
+            omega, d_omega, Umax_hist(step));
 
         if (d_lambda / d_omega) * (omega_hist(step) - omega_hist(1)) < d_lambda_diff_scaled_min
-            disp('Minimal increase of lambda was achieved.');
+            fprintf('Stop: minimal increase of lambda achieved.\n');
             break;
         end
 
         if omega >= omega_max_stop
-            disp('Maximal omega was achieved.');
+            fprintf('Stop: maximal omega achieved.\n');
             break;
         end
 
@@ -309,11 +218,11 @@ while true
 
     % Stopping criteria for the indirect continuation method.
     if n_omega >= n_omega_max
-        disp('It is impossible to increase omega.');
+        fprintf('Stop: impossible to increase omega.\n');
         break;
     end
     if step >= step_max
-        disp('Maximal number of steps was achieved.');
+        fprintf('Stop: maximal number of steps achieved.\n');
         break;
     end
 
@@ -326,18 +235,3 @@ Umax_hist   = Umax_hist(1:step);
 stats.total_wall_time = toc(t_total);
 
 end % function
-
-function snap = local_collector_snapshot(linear_system_solver)
-collector = linear_system_solver.iteration_collector;
-snap.iterations = collector.get_total_iterations();
-snap.solve_time = collector.get_total_solve_time();
-snap.preconditioner_time = collector.get_total_preconditioner_time();
-snap.orthogonalization_time = collector.get_total_orthogonalization_time();
-end
-
-function delta = local_collector_delta(snap0, snap1)
-delta.iterations = snap1.iterations - snap0.iterations;
-delta.solve_time = snap1.solve_time - snap0.solve_time;
-delta.preconditioner_time = snap1.preconditioner_time - snap0.preconditioner_time;
-delta.orthogonalization_time = snap1.orthogonalization_time - snap0.orthogonalization_time;
-end

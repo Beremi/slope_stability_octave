@@ -188,26 +188,28 @@ if ~isempty(strfind(upper(char(solver_type)), 'BOOMERAMG'))
     LINEAR_SOLVERS.hypre_boomeramg_clear();
 end
 
-%% Postprocessing - visualization of selected results for direct continuation
+%% Postprocessing - visualization using SolutionPlotter
+plotter = VIZ.SolutionPlotter(coord, elem, [], B, [], 'comsol');
+
 if direct_on
-    VIZ.plot_deviatoric_strain_2D(U2,coord,elem,B);
-    VIZ.plot_displacements_2D(U2,coord,elem);
-    % Visualization of the curve: omega -> lambda for direct continuation.
-    figure; hold on; box on; grid on;
-    plot(omega_hist2, lambda_hist2, '-o');
-    title('Direct continuation method', 'Interpreter', 'latex')
-    xlabel('variable - $\xi$', 'Interpreter', 'latex');
-    ylabel('strength reduction factor - $\lambda$', 'Interpreter', 'latex');
+    plotter.add_solution('direct', U2, lambda_hist2, omega_hist2, Umax_hist2, struct( ...
+        'title', 'Direct continuation method', ...
+        'xlabel', 'Control variable - $\omega$', ...
+        'ylabel', 'strength reduction factor - $\lambda$', ...
+        'marker', '-o'));
 end
 
-%% Postprocessing - visualization of selected results for indirect continuation
 if indirect_on
-    VIZ.plot_deviatoric_strain_2D(U3,coord,elem,B);
-    VIZ.plot_displacements_2D(U3,coord,elem);
-    % Visualization of the curve: omega -> lambda for indirect continuation.
-    figure; hold on; box on; grid on;
-    plot(omega_hist3, lambda_hist3, '-o');
-    title('Indirect continuation method', 'Interpreter', 'latex')
-    xlabel('control variable - $\omega$', 'Interpreter', 'latex');
-    ylabel('strength reduction factor - $\lambda$', 'Interpreter', 'latex');
+    plotter.add_solution('indirect', U3, lambda_hist3, omega_hist3, Umax_hist3, struct( ...
+        'title', 'Indirect continuation method', ...
+        'xlabel', 'Control variable - $\omega$', ...
+        'ylabel', 'strength reduction factor - $\lambda$', ...
+        'marker', '-o'));
+end
+
+if plotter.n_solutions > 0
+    plotter.plot_deviatoric_strain();
+    plotter.plot_displacements();
+    % Continuation curves remain separate per method (different axes/scales/labels possible).
+    plotter.plot_convergence();
 end

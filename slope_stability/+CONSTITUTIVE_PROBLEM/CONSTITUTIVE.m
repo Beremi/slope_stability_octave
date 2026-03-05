@@ -6,8 +6,8 @@ classdef CONSTITUTIVE < handle
     % residual forces from strain fields at integration points.
     %
     % The class stores material parameters, quadrature weights, and the
-    % strain-displacement matrix. It also measures runtimes for various
-    % operations such as reduction, stress evaluation, and tangent assembly.
+    % strain-displacement matrix.  Timing is handled by the optional
+    % PROFILING.Profiler handle attached via the 'profiler' property.
     %
     % Properties:
     %   c0          - Effective cohesion at integration points.
@@ -28,10 +28,6 @@ classdef CONSTITUTIVE < handle
     %   n_int       - Number of integration points.
     %   AUX, iD, jD, vD_pre - Auxiliary arrays for assembling sparse matrices.
     %
-    %   Runtime measurements (vectors):
-    %     time_reduction, time_stress, time_stress_tangent,
-    %     time_build_F, time_build_F_K_tangent, time_potential.
-    %
     % Methods:
     %   CONSTITUTIVE   - Constructor.
     %   reduction      - Perform material reduction with a given factor.
@@ -42,8 +38,6 @@ classdef CONSTITUTIVE < handle
     %   build_F_all, build_F_K_tangent_all - Combined operations with reduction.
     %   build_F_reduced, build_F_K_tangent_reduced - Operations without reduction.
     %   potential      - Compute the integrated potential.
-    %   get_total_time and similar - Retrieve accumulated runtimes.
-    %   get_*_time_vector - Return runtime vectors.
     %--------------------------------------------------------------------------
 
     properties
@@ -67,14 +61,6 @@ classdef CONSTITUTIVE < handle
         iD
         jD
         vD_pre
-
-        % Runtime measurements (vectors)
-        time_reduction
-        time_stress
-        time_stress_tangent
-        time_build_F
-        time_build_F_K_tangent
-        time_potential
 
         % Sparse K_r(Q,Q) assembly infrastructure
         B_Q                 % B restricted to free DOFs
@@ -100,10 +86,11 @@ classdef CONSTITUTIVE < handle
         elem_data_set       % Flag: element geometry data has been provided
         elem_assembly_ready % Flag: scatter map has been built
         elem_use_mex        % Flag: mex assembly function is available
+        use_2D_mex          % Flag: constitutive_problem_2D mex files available
         use_3D_mex          % Flag: constitutive_problem_3D mex files available
 
-        % Per-call timing breakdown (set by build_F_and_DS_all, read by caller)
-        last_build_F_DS_timing  % struct: t_reduction, t_stress_tangent, t_build_F
+        % Optional profiler (PROFILING.Profiler handle, [] = disabled)
+        profiler
     end
 
     methods
@@ -147,14 +134,6 @@ classdef CONSTITUTIVE < handle
             obj.jD = kron(obj.AUX, ones(obj.n_strain, 1));
             obj.vD_pre = repmat(obj.WEIGHT, obj.n_strain^2, 1);
 
-            % Initialize runtime measurement vectors as empty.
-            obj.time_reduction = [];
-            obj.time_stress = [];
-            obj.time_stress_tangent = [];
-            obj.time_build_F = [];
-            obj.time_build_F_K_tangent = [];
-            obj.time_potential = [];
-
             % Sparse pattern not yet initialized.
             obj.B_Q = [];
             obj.DS_elast = [];
@@ -180,11 +159,20 @@ classdef CONSTITUTIVE < handle
             obj.elem_assembly_ready = false;
             this_pkg_dir = fileparts(mfilename('fullpath'));
             root_dir = fileparts(this_pkg_dir);
-            obj.elem_use_mex = (exist(fullfile(root_dir, '+ASSEMBLY', 'assemble_K_tangent_vals.mex'), 'file') == 3);
+            if dim == 2
+                obj.elem_use_mex = (exist(fullfile(root_dir, '+ASSEMBLY', 'assemble_K_tangent_vals_2D.mex'), 'file') == 3);
+            elseif dim == 3
+                obj.elem_use_mex = (exist(fullfile(root_dir, '+ASSEMBLY', 'assemble_K_tangent_vals.mex'), 'file') == 3);
+            else
+                obj.elem_use_mex = false;
+            end
             obj.use_3D_mex = (dim == 3) && ...
                 (exist(fullfile(this_pkg_dir, 'constitutive_problem_3D_S_mex.mex'), 'file') == 3) && ...
                 (exist(fullfile(this_pkg_dir, 'constitutive_problem_3D_SDS_mex.mex'), 'file') == 3);
-            obj.last_build_F_DS_timing = struct();
+            obj.use_2D_mex = (dim == 2) && ...
+                (exist(fullfile(this_pkg_dir, 'constitutive_problem_2D_S_mex.mex'), 'file') == 3) && ...
+                (exist(fullfile(this_pkg_dir, 'constitutive_problem_2D_SDS_mex.mex'), 'file') == 3);
+            obj.profiler = [];
         end
 
         function obj = reduction(obj, lambda)
@@ -208,7 +196,7 @@ classdef CONSTITUTIVE < handle
             t_start = tic;
             [obj.c_bar, obj.sin_phi] = CONSTITUTIVE_PROBLEM.reduction(obj.c0, obj.phi, obj.psi, lambda, obj.Davis_type);
             elapsed_time = toc(t_start);
-            obj.time_reduction(end + 1) = elapsed_time;
+            if ~isempty(obj.profiler), obj.profiler.add_time('CONSTITUTIVE.reduction', elapsed_time); end
         end
 
         function obj = constitutive_problem_stress(obj, U)
@@ -229,7 +217,9 @@ classdef CONSTITUTIVE < handle
             t_start = tic;
             E = obj.B * U(:);  % Strain at integration points.
             E = reshape(E, obj.n_strain, []);
-            if obj.use_3D_mex
+            if obj.use_2D_mex
+                obj.S = CONSTITUTIVE_PROBLEM.constitutive_problem_2D_S_mex(E, obj.c_bar, obj.sin_phi, obj.shear, obj.bulk, obj.lame);
+            elseif obj.use_3D_mex
                 obj.S = CONSTITUTIVE_PROBLEM.constitutive_problem_3D_S_mex(E, obj.c_bar, obj.sin_phi, obj.shear, obj.bulk, obj.lame);
             elseif obj.dim == 2
                 [obj.S] = CONSTITUTIVE_PROBLEM.constitutive_problem_2D(E, obj.c_bar, obj.sin_phi, obj.shear, obj.bulk, obj.lame);
@@ -239,7 +229,7 @@ classdef CONSTITUTIVE < handle
                 error("wrong dimension");
             end
             elapsed_time = toc(t_start);
-            obj.time_stress(end + 1) = elapsed_time;
+            if ~isempty(obj.profiler), obj.profiler.add_time('CONSTITUTIVE.stress', elapsed_time); end
         end
 
         function obj = constitutive_problem_stress_tangent(obj, U)
@@ -260,7 +250,9 @@ classdef CONSTITUTIVE < handle
             t_start = tic;
             E = obj.B * U(:);  % Strain at integration points.
             E = reshape(E, obj.n_strain, []);
-            if obj.use_3D_mex
+            if obj.use_2D_mex
+                [obj.S, obj.DS] = CONSTITUTIVE_PROBLEM.constitutive_problem_2D_SDS_mex(E, obj.c_bar, obj.sin_phi, obj.shear, obj.bulk, obj.lame);
+            elseif obj.use_3D_mex
                 [obj.S, obj.DS] = CONSTITUTIVE_PROBLEM.constitutive_problem_3D_SDS_mex(E, obj.c_bar, obj.sin_phi, obj.shear, obj.bulk, obj.lame);
             elseif obj.dim == 2
                 [obj.S, obj.DS] = CONSTITUTIVE_PROBLEM.constitutive_problem_2D(E, obj.c_bar, obj.sin_phi, obj.shear, obj.bulk, obj.lame);
@@ -270,7 +262,7 @@ classdef CONSTITUTIVE < handle
                 error("wrong dimension");
             end
             elapsed_time = toc(t_start);
-            obj.time_stress_tangent(end + 1) = elapsed_time;
+            if ~isempty(obj.profiler), obj.profiler.add_time('CONSTITUTIVE.stress_tangent', elapsed_time); end
         end
 
         function F = build_F(obj)
@@ -289,7 +281,7 @@ classdef CONSTITUTIVE < handle
             F = obj.B' * reshape(repmat(obj.WEIGHT, obj.n_strain, 1) .* obj.S(1:obj.n_strain, :), [], 1);
             F = reshape(F, obj.dim, []);
             elapsed_time = toc(t_start);
-            obj.time_build_F(end + 1) = elapsed_time;
+            if ~isempty(obj.profiler), obj.profiler.add_time('CONSTITUTIVE.build_F', elapsed_time); end
         end
 
         function [F, K_tangent] = build_F_K_tangent(obj)
@@ -312,8 +304,6 @@ classdef CONSTITUTIVE < handle
             D_p = sparse(obj.iD(:), obj.jD(:), vD(:), obj.n_strain * obj.n_int, obj.n_strain * obj.n_int);
             K_tangent = obj.B' * D_p * obj.B;
             K_tangent = (K_tangent + K_tangent') / 2;
-            elapsed_time = toc(t_start);
-            obj.time_build_F_K_tangent(end + 1) = elapsed_time;
         end
 
         function F = build_F_all(obj, lambda, U)
@@ -393,66 +383,7 @@ classdef CONSTITUTIVE < handle
             end
             Psi_integrated = obj.WEIGHT * Psi';
             elapsed_time = toc(t_start);
-            obj.time_potential(end + 1) = elapsed_time;
-        end
-
-        % Methods to get total runtime measurements.
-        function total_time = get_total_time(obj)
-            %--------------------------------------------------------------------------
-            % get_total_time Returns the sum of all recorded runtimes.
-            %--------------------------------------------------------------------------
-            total_time = sum(obj.time_reduction) + sum(obj.time_stress) + ...
-                sum(obj.time_stress_tangent) + sum(obj.time_build_F) + ...
-                sum(obj.time_build_F_K_tangent) + sum(obj.time_potential);
-        end
-
-        function total_time = get_total_reduction_time(obj)
-            total_time = sum(obj.time_reduction);
-        end
-
-        function total_time = get_total_stress_time(obj)
-            total_time = sum(obj.time_stress);
-        end
-
-        function total_time = get_total_stress_tangent_time(obj)
-            total_time = sum(obj.time_stress_tangent);
-        end
-
-        function total_time = get_total_build_F_time(obj)
-            total_time = sum(obj.time_build_F);
-        end
-
-        function total_time = get_total_build_F_K_tangent_time(obj)
-            total_time = sum(obj.time_build_F_K_tangent);
-        end
-
-        function total_time = get_total_potential_time(obj)
-            total_time = sum(obj.time_potential);
-        end
-
-        % Methods to get runtime vectors.
-        function time_vector = get_reduction_time_vector(obj)
-            time_vector = obj.time_reduction;
-        end
-
-        function time_vector = get_stress_time_vector(obj)
-            time_vector = obj.time_stress;
-        end
-
-        function time_vector = get_stress_tangent_time_vector(obj)
-            time_vector = obj.time_stress_tangent;
-        end
-
-        function time_vector = get_build_F_time_vector(obj)
-            time_vector = obj.time_build_F;
-        end
-
-        function time_vector = get_build_F_K_tangent_time_vector(obj)
-            time_vector = obj.time_build_F_K_tangent;
-        end
-
-        function time_vector = get_potential_time_vector(obj)
-            time_vector = obj.time_potential;
+            if ~isempty(obj.profiler), obj.profiler.add_time('CONSTITUTIVE.potential', elapsed_time); end
         end
 
         % ============================================================
@@ -537,24 +468,10 @@ classdef CONSTITUTIVE < handle
             % build_F_and_DS_all  Reduction + stress/tangent + build F.
             % Same as build_F_K_tangent_all but skips the sparse K assembly.
             % After this call obj.DS holds the current tangent moduli.
-            % Per-line timing is stored in obj.last_build_F_DS_timing.
             %--------------------------------------------------------------------------
-            t_tmp = tic;
             obj.reduction(lambda);
-            t_red = toc(t_tmp);
-
-            t_tmp = tic;
             obj.constitutive_problem_stress_tangent(U);
-            t_st = toc(t_tmp);
-
-            t_tmp = tic;
             F = obj.build_F();
-            t_bf = toc(t_tmp);
-
-            obj.last_build_F_DS_timing = struct( ...
-                't_reduction', t_red, ...
-                't_stress_tangent', t_st, ...
-                't_build_F', t_bf);
         end
 
         function F = build_F_and_DS_reduced(obj, U)
@@ -574,11 +491,13 @@ classdef CONSTITUTIVE < handle
             % Dispatches to element-level assembly (mex or Octave) if
             % available, otherwise falls back to global B_Q' * D_t * B_Q.
             %--------------------------------------------------------------------------
+            t_kt = tic;
             if obj.elem_assembly_ready
                 V_tang = obj.build_K_tangent_QQ_vals_element();
             else
                 V_tang = obj.build_K_tangent_QQ_vals_global();
             end
+            if ~isempty(obj.profiler), obj.profiler.add_time('CONSTITUTIVE.build_K_tangent_QQ_vals', toc(t_kt)); end
         end
 
         function V_tang = build_K_tangent_QQ_vals_global(obj)
@@ -628,6 +547,14 @@ classdef CONSTITUTIVE < handle
             % DPhi2  - global basis derivatives d/dx2 (n_p x n_int)
             % DPhi3  - global basis derivatives d/dx3 (n_p x n_int)
             %--------------------------------------------------------------------------
+            if (nargin < 5) || isempty(DPhi3)
+                if obj.dim == 2
+                    DPhi3 = zeros(size(DPhi1));
+                else
+                    error('DPhi3 is required for 3D element data.');
+                end
+            end
+
             obj.elem_ELEM  = ELEM;
             obj.elem_DPhi1 = DPhi1;
             obj.elem_DPhi2 = DPhi2;
@@ -638,7 +565,11 @@ classdef CONSTITUTIVE < handle
             obj.elem_data_set = true;
             this_pkg_dir = fileparts(mfilename('fullpath'));
             root_dir = fileparts(this_pkg_dir);
-            obj.elem_use_mex = (exist(fullfile(root_dir, '+ASSEMBLY', 'assemble_K_tangent_vals.mex'), 'file') == 3);
+            if obj.dim == 2
+                obj.elem_use_mex = (exist(fullfile(root_dir, '+ASSEMBLY', 'assemble_K_tangent_vals_2D.mex'), 'file') == 3);
+            else
+                obj.elem_use_mex = (exist(fullfile(root_dir, '+ASSEMBLY', 'assemble_K_tangent_vals.mex'), 'file') == 3);
+            end
             fprintf('Element data set: n_p=%d, n_e=%d, n_q=%d, mex=%d\n', ...
                 obj.elem_n_p, obj.elem_n_e, obj.elem_n_q, obj.elem_use_mex);
 
@@ -711,10 +642,17 @@ classdef CONSTITUTIVE < handle
             %--------------------------------------------------------------------------
             nnz_out = numel(obj.ref_I);
             if obj.elem_use_mex
-                V_tang = ASSEMBLY.assemble_K_tangent_vals( ...
-                    obj.elem_DPhi1, obj.elem_DPhi2, obj.elem_DPhi3, ...
-                    obj.DS, obj.WEIGHT, obj.elem_scatter_map, ...
-                    int32(obj.elem_n_q), int32(nnz_out));
+                if obj.dim == 2
+                    V_tang = ASSEMBLY.assemble_K_tangent_vals_2D( ...
+                        obj.elem_DPhi1, obj.elem_DPhi2, ...
+                        obj.DS, obj.WEIGHT, obj.elem_scatter_map, ...
+                        int32(obj.elem_n_q), int32(nnz_out));
+                else
+                    V_tang = ASSEMBLY.assemble_K_tangent_vals( ...
+                        obj.elem_DPhi1, obj.elem_DPhi2, obj.elem_DPhi3, ...
+                        obj.DS, obj.WEIGHT, obj.elem_scatter_map, ...
+                        int32(obj.elem_n_q), int32(nnz_out));
+                end
             else
                 V_tang = obj.build_K_tangent_QQ_vals_octave();
             end
@@ -743,20 +681,34 @@ classdef CONSTITUTIVE < handle
 
                     % Build local B_eq (ns x n_local_dof)
                     B_eq = zeros(ns, n_local_dof);
-                    for i = 1:np
-                        dN1 = obj.elem_DPhi1(i, g);
-                        dN2 = obj.elem_DPhi2(i, g);
-                        dN3 = obj.elem_DPhi3(i, g);
-                        c = (i - 1) * 3;
-                        B_eq(1, c+1) = dN1;
-                        B_eq(2, c+2) = dN2;
-                        B_eq(3, c+3) = dN3;
-                        B_eq(4, c+1) = dN2;
-                        B_eq(4, c+2) = dN1;
-                        B_eq(5, c+2) = dN3;
-                        B_eq(5, c+3) = dN2;
-                        B_eq(6, c+1) = dN3;
-                        B_eq(6, c+3) = dN1;
+                    if obj.dim == 2
+                        for i = 1:np
+                            dN1 = obj.elem_DPhi1(i, g);
+                            dN2 = obj.elem_DPhi2(i, g);
+                            c = (i - 1) * 2;
+                            B_eq(1, c+1) = dN1;
+                            B_eq(2, c+2) = dN2;
+                            B_eq(3, c+1) = dN2;
+                            B_eq(3, c+2) = dN1;
+                        end
+                    elseif obj.dim == 3
+                        for i = 1:np
+                            dN1 = obj.elem_DPhi1(i, g);
+                            dN2 = obj.elem_DPhi2(i, g);
+                            dN3 = obj.elem_DPhi3(i, g);
+                            c = (i - 1) * 3;
+                            B_eq(1, c+1) = dN1;
+                            B_eq(2, c+2) = dN2;
+                            B_eq(3, c+3) = dN3;
+                            B_eq(4, c+1) = dN2;
+                            B_eq(4, c+2) = dN1;
+                            B_eq(5, c+2) = dN3;
+                            B_eq(5, c+3) = dN2;
+                            B_eq(6, c+1) = dN3;
+                            B_eq(6, c+3) = dN1;
+                        end
+                    else
+                        error('Unsupported dimension %d for element-level assembly.', obj.dim);
                     end
                     Ke = Ke + B_eq' * D_eq * B_eq;
                 end

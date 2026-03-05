@@ -6,9 +6,7 @@ surf_points = coord(:, surf_nodes);
 figure
 plot3(surf_points(1,:), surf_points(2,:), surf_points(3,:), 'ro')
 axis equal
-[t,s] = title('Surf likely contains all boundaries, even those between domains with different parameters','Surf is a LIE!');
-t.FontSize = 10;
-s.FontSize = 16;
+title('Surf likely contains all boundaries, even those between domains with different parameters');
 
 [Q_w, pw_D] = MESH.seepage_boundary_3D_hetero_comsol(coord, surf, triangle_labels, grho);
 d_nodes = coord(:, Q_w == 0);

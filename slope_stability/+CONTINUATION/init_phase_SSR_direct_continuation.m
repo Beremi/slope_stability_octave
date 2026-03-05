@@ -62,9 +62,7 @@ U_ini = zeros(dim, n_n);         % Initial displacement field.
 %
 % First step of the continuation method.
 %
-fprintf('\n'); 
-fprintf(' Step = %d  ', 1); 
-fprintf('\n'); 
+fprintf('Init step 1: lambda=%.6g\n', lambda_init);
 
 % Compute U and omega for the initial lambda (lambda1).
 [U1, omega1, flag] = CONTINUATION.omega_SSR_direct_continuation(...
@@ -84,9 +82,7 @@ disp(['   lambda_init = ', num2str(lambda_init), ...
 %
 % Second step of the continuation method.
 %
-fprintf('\n'); 
-fprintf(' Step = %d  ', 2); 
-fprintf('\n'); 
+fprintf('Init step 2: searching lambda2 from lambda1=%.6g\n', lambda_init);
 
 d_lambda = d_lambda_init;  % Set the initial increment of lambda.
 lambda1 = lambda_init;     % Set initial value of lambda

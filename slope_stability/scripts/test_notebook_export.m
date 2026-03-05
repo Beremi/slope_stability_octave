@@ -103,6 +103,9 @@ constitutive_matrix_builder.set_element_data(elem, DPhi1_out, DPhi2_out, DPhi3_o
 
 %% 6) Run SSR Continuation
 fprintf('\n Indirect continuation method\n');
+profiler = PROFILING.Profiler();
+constitutive_matrix_builder.profiler = profiler;
+linear_system_solver.profiler = profiler;
 tic;
 [U3, lambda_hist3, omega_hist3, Umax_hist3, stats] = CONTINUATION.SSR_indirect_continuation( ...
     lambda_init, d_lambda_init, d_lambda_min, d_lambda_diff_scaled_min, step_max, ...
@@ -115,105 +118,9 @@ if ~isempty(strfind(upper(char(solver_type)), 'BOOMERAMG'))
     LINEAR_SOLVERS.hypre_boomeramg_clear();
 end
 
-%% Newton Profiler Summary
-if exist('stats', 'var') && isfield(stats, 'newton_timing')
-    nt = stats.newton_timing;
-
-    %% --- Top-level timing table (existing fields only) ---
-    top_fields = {'build_F_and_DS', 'solve_V', 'A_orthogonalize', 'damping', ...
-        'setup_preconditioner', 'build_F_eps', 'solve_W', ...
-        'K_r_assembly', 'sparsersb_build', ...
-        'expand_deflation_W', 'expand_deflation_V'};
-    top_labels = top_fields(isfield(nt, top_fields));
-    top_times  = cellfun(@(f) nt.(f), top_labels);
-    total      = sum(top_times);
-
-    [top_times, idx] = sort(top_times, 'descend');
-    top_labels = top_labels(idx);
-    pcts       = 100 * top_times / total;
-
-    desc_map = struct( ...
-        'build_F_and_DS',      'build_F_and_DS_all     (constitutive F + DS)', ...
-        'solve_V',             'linear_solver.solve     (V solve)',           ...
-        'A_orthogonalize',     'linear_solver.A_orthogonalize',              ...
-        'damping',             'NEWTON.damping_ALG5     (line search)',       ...
-        'setup_preconditioner','setup/update preconditioner (HYPRE IJV)',     ...
-        'build_F_eps',         'build_F_all             (F_eps for diff)',    ...
-        'solve_W',             'linear_solver.solve     (W solve)',           ...
-        'K_r_assembly',        'K_r sparsersb assembly  (BtDB prebuilt)',    ...
-        'expand_deflation_W',  'expand_deflation_basis  (W)',                ...
-        'expand_deflation_V',  'expand_deflation_basis  (V)');
-
-    fprintf('\n============================================================\n');
-    fprintf('  Newton Profiler  (newton_ind_SSR accumulated)\n');
-    fprintf('============================================================\n');
-    fprintf('  %-6s  %-8s  %s\n', 'Time', '  %', 'Operation');
-    fprintf('  %-6s  %-8s  %s\n', '------', '------', '------------------------------');
-    for k = 1:numel(top_labels)
-        lbl = top_labels{k};
-        if isfield(desc_map, lbl)
-            desc = desc_map.(lbl);
-        else
-            desc = lbl;
-        end
-        fprintf('  %6.1fs  %5.1f%%   %s\n', top_times(k), pcts(k), desc);
-    end
-    fprintf('  %-6s  %-8s  %s\n', '------', '------', '------------------------------');
-    fprintf('  %6.1fs  %5.1f%%   %s\n', total, 100.0, 'TOTAL');
-    fprintf('============================================================\n');
-
-    %% --- Sub-profiling: build_F_and_DS_all breakdown ---
-    if isfield(nt, 'build_F_DS__n_calls')
-        fprintf('\n  Sub-profile: build_F_and_DS_all  (%d calls)\n', nt.build_F_DS__n_calls);
-        fprintf('  %-6s  %-8s  %s\n', '------', '------', '------------------------------');
-        sub_items = { ...
-            nt.build_F_DS__reduction,      'reduction(lambda)'; ...
-            nt.build_F_DS__stress_tangent, 'constitutive_problem_stress_tangent(U)'; ...
-            nt.build_F_DS__build_F,        'build_F()'};
-        sub_total = nt.build_F_and_DS;
-        for k = 1:size(sub_items, 1)
-            fprintf('  %6.2fs  %5.1f%%   %s\n', sub_items{k,1}, ...
-                100 * sub_items{k,1} / max(sub_total, 1e-12), sub_items{k,2});
-        end
-    end
-
-    %% --- Sub-profiling: damping_ALG5 breakdown ---
-    if isfield(nt, 'damping__n_calls')
-        fprintf('\n  Sub-profile: damping_ALG5  (%d calls, %d damp iters total)\n', ...
-            nt.damping__n_calls, nt.damping__n_iters);
-        fprintf('  %-6s  %-8s  %s\n', '------', '------', '------------------------------');
-        sub_items = { ...
-            nt.damping__build_F, 'build_F_all  (constitutive evaluation)'; ...
-            nt.damping__norm,    'norm(F(Q)-f(Q))  (residual check)'};
-        sub_total = nt.damping;
-        for k = 1:size(sub_items, 1)
-            fprintf('  %6.2fs  %5.1f%%   %s\n', sub_items{k,1}, ...
-                100 * sub_items{k,1} / max(sub_total, 1e-12), sub_items{k,2});
-        end
-    end
-
-    %% --- Sub-profiling: dfgmres_solver breakdown (V+W combined) ---
-    if isfield(nt, 'solve__n_calls')
-        fprintf('\n  Sub-profile: dfgmres_solver  (%d calls, %d GMRES iters, %d matvecs, %d prec applies)\n', ...
-            nt.solve__n_calls, nt.solve__n_gmres_iters, ...
-            nt.solve__n_matvecs, nt.solve__n_prec_applies);
-        fprintf('  %-6s  %-8s  %s\n', '------', '------', '------------------------------');
-        sub_items = { ...
-            nt.solve__precond,     'M(v)  preconditioner apply'; ...
-            nt.solve__matvec,      'A*w   matrix-vector product'; ...
-            nt.solve__project,     'Proj(w) deflation projection'; ...
-            nt.solve__ortho,       'Arnoldi orthogonalisation'; ...
-            nt.solve__leastsq,     'least-squares + residual check'; ...
-            nt.solve__init,        'init (coarse solve + r0)'; ...
-            nt.solve__reconstruct, 'solution reconstruction'};
-        sub_total = nt.solve_V + nt.solve_W;
-        for k = 1:size(sub_items, 1)
-            fprintf('  %6.2fs  %5.1f%%   %s\n', sub_items{k,1}, ...
-                100 * sub_items{k,1} / max(sub_total, 1e-12), sub_items{k,2});
-        end
-    end
-
-    fprintf('============================================================\n');
+%% Profiler Summary
+if exist('profiler', 'var')
+    profiler.print_summary();
 end
 
 fprintf('\nTest completed successfully.\n');
