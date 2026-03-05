@@ -104,8 +104,8 @@ constitutive_matrix_builder.set_element_data(elem, DPhi1_out, DPhi2_out, DPhi3_o
 %% 6) Run SSR Continuation
 fprintf('\n Indirect continuation method\n');
 profiler = PROFILING.Profiler();
-constitutive_matrix_builder.set_profiler(profiler);
-linear_system_solver.set_profiler(profiler);
+constitutive_matrix_builder.profiler = profiler;
+linear_system_solver.profiler = profiler;
 tic;
 [U3, lambda_hist3, omega_hist3, Umax_hist3, stats] = CONTINUATION.SSR_indirect_continuation( ...
     lambda_init, d_lambda_init, d_lambda_min, d_lambda_diff_scaled_min, step_max, ...

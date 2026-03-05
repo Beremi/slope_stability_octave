@@ -11,10 +11,11 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-SRC="$SCRIPT_DIR/assemble_K_tangent_vals.c"
+SRC_3D="$SCRIPT_DIR/assemble_K_tangent_vals.c"
+SRC_2D="$SCRIPT_DIR/assemble_K_tangent_vals_2D.c"
 OUT_DIR="$SCRIPT_DIR/.."
 
-echo "Compiling assemble_K_tangent_vals.c ..."
+echo "Compiling element-level tangent assembly mex files ..."
 
 # Detect the right mkoctfile
 if command -v mkoctfile &>/dev/null; then
@@ -26,10 +27,20 @@ else
     exit 1
 fi
 
-$MKOCTFILE --mex -O2 \
-    -DHAVE_OPENMP \
-    "$SRC" \
-    -o "$OUT_DIR/assemble_K_tangent_vals.mex" \
-    -fopenmp -lgomp
+compile_one () {
+    local src="$1"
+    local out="$2"
+    echo "  -> $(basename "$out")"
+    $MKOCTFILE --mex -O2 \
+        -DHAVE_OPENMP \
+        "$src" \
+        -o "$out" \
+        -fopenmp -lgomp
+}
 
-echo "Done.  Output: $OUT_DIR/assemble_K_tangent_vals.mex"
+compile_one "$SRC_3D" "$OUT_DIR/assemble_K_tangent_vals.mex"
+compile_one "$SRC_2D" "$OUT_DIR/assemble_K_tangent_vals_2D.mex"
+
+echo "Done.  Outputs:"
+echo "  $OUT_DIR/assemble_K_tangent_vals.mex"
+echo "  $OUT_DIR/assemble_K_tangent_vals_2D.mex"

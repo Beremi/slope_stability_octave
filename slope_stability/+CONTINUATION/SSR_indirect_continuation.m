@@ -110,13 +110,10 @@ step_wall_accum = 0;
 step_newton_it_accum = 0;
 step_attempt_count = 0;
 while true
-    fprintf('\n');
-    fprintf(' Step = %d\n', step + 1);
-    fprintf('\n');
-
     % Update of the parameter omega.
     omega_it = min(omega + d_omega, omega_max_stop);
     d_omega = omega_it - omega;
+    fprintf('Step %d: omega_target=%.6g, d_omega=%.6g\n', step + 1, omega_it, d_omega);
 
     % Initial estimate of the displacement field by linear extrapolation.
     U_ini = d_omega * (U - U_old) / (omega - omega_old) + U;
@@ -165,6 +162,7 @@ while true
 
     % Evaluation of the solver and update.
     if flag == 1  % Solver was not successful.
+        fprintf('  retry: reducing d_omega from %.6g to %.6g\n', d_omega, d_omega / 2);
         d_omega = d_omega / 2;
         n_omega = n_omega + 1;
     else        % Solver was successful.
@@ -197,20 +195,18 @@ while true
         step_attempt_count = 0;
 
         % Display.
-        disp(['   lambda = ', num2str(lambda), ...
-            ', d_lambda = ', num2str(d_lambda), ...
-            ', d_lambda_diff_scaled = ', num2str(d_lambda / d_omega * (omega_hist(step) - omega_hist(1))), ...
-            ', omega = ', num2str(omega), ...
-            ', d_omega = ', num2str(d_omega), ...
-            ', U_max = ', num2str(Umax_hist(step))]);
+        fprintf(['  accepted: lambda=%.6g, d_lambda=%.6g, d_lambda_diff_scaled=%.6g, ', ...
+            'omega=%.6g, d_omega=%.6g, U_max=%.6g\n'], ...
+            lambda, d_lambda, d_lambda / d_omega * (omega_hist(step) - omega_hist(1)), ...
+            omega, d_omega, Umax_hist(step));
 
         if (d_lambda / d_omega) * (omega_hist(step) - omega_hist(1)) < d_lambda_diff_scaled_min
-            disp('Minimal increase of lambda was achieved.');
+            fprintf('Stop: minimal increase of lambda achieved.\n');
             break;
         end
 
         if omega >= omega_max_stop
-            disp('Maximal omega was achieved.');
+            fprintf('Stop: maximal omega achieved.\n');
             break;
         end
 
@@ -222,11 +218,11 @@ while true
 
     % Stopping criteria for the indirect continuation method.
     if n_omega >= n_omega_max
-        disp('It is impossible to increase omega.');
+        fprintf('Stop: impossible to increase omega.\n');
         break;
     end
     if step >= step_max
-        disp('Maximal number of steps was achieved.');
+        fprintf('Stop: maximal number of steps achieved.\n');
         break;
     end
 

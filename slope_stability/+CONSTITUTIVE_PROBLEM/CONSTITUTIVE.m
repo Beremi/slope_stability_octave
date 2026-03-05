@@ -86,6 +86,7 @@ classdef CONSTITUTIVE < handle
         elem_data_set       % Flag: element geometry data has been provided
         elem_assembly_ready % Flag: scatter map has been built
         elem_use_mex        % Flag: mex assembly function is available
+        use_2D_mex          % Flag: constitutive_problem_2D mex files available
         use_3D_mex          % Flag: constitutive_problem_3D mex files available
 
         % Optional profiler (PROFILING.Profiler handle, [] = disabled)
@@ -158,10 +159,19 @@ classdef CONSTITUTIVE < handle
             obj.elem_assembly_ready = false;
             this_pkg_dir = fileparts(mfilename('fullpath'));
             root_dir = fileparts(this_pkg_dir);
-            obj.elem_use_mex = (exist(fullfile(root_dir, '+ASSEMBLY', 'assemble_K_tangent_vals.mex'), 'file') == 3);
+            if dim == 2
+                obj.elem_use_mex = (exist(fullfile(root_dir, '+ASSEMBLY', 'assemble_K_tangent_vals_2D.mex'), 'file') == 3);
+            elseif dim == 3
+                obj.elem_use_mex = (exist(fullfile(root_dir, '+ASSEMBLY', 'assemble_K_tangent_vals.mex'), 'file') == 3);
+            else
+                obj.elem_use_mex = false;
+            end
             obj.use_3D_mex = (dim == 3) && ...
                 (exist(fullfile(this_pkg_dir, 'constitutive_problem_3D_S_mex.mex'), 'file') == 3) && ...
                 (exist(fullfile(this_pkg_dir, 'constitutive_problem_3D_SDS_mex.mex'), 'file') == 3);
+            obj.use_2D_mex = (dim == 2) && ...
+                (exist(fullfile(this_pkg_dir, 'constitutive_problem_2D_S_mex.mex'), 'file') == 3) && ...
+                (exist(fullfile(this_pkg_dir, 'constitutive_problem_2D_SDS_mex.mex'), 'file') == 3);
             obj.profiler = [];
         end
 
@@ -207,7 +217,9 @@ classdef CONSTITUTIVE < handle
             t_start = tic;
             E = obj.B * U(:);  % Strain at integration points.
             E = reshape(E, obj.n_strain, []);
-            if obj.use_3D_mex
+            if obj.use_2D_mex
+                obj.S = CONSTITUTIVE_PROBLEM.constitutive_problem_2D_S_mex(E, obj.c_bar, obj.sin_phi, obj.shear, obj.bulk, obj.lame);
+            elseif obj.use_3D_mex
                 obj.S = CONSTITUTIVE_PROBLEM.constitutive_problem_3D_S_mex(E, obj.c_bar, obj.sin_phi, obj.shear, obj.bulk, obj.lame);
             elseif obj.dim == 2
                 [obj.S] = CONSTITUTIVE_PROBLEM.constitutive_problem_2D(E, obj.c_bar, obj.sin_phi, obj.shear, obj.bulk, obj.lame);
@@ -238,7 +250,9 @@ classdef CONSTITUTIVE < handle
             t_start = tic;
             E = obj.B * U(:);  % Strain at integration points.
             E = reshape(E, obj.n_strain, []);
-            if obj.use_3D_mex
+            if obj.use_2D_mex
+                [obj.S, obj.DS] = CONSTITUTIVE_PROBLEM.constitutive_problem_2D_SDS_mex(E, obj.c_bar, obj.sin_phi, obj.shear, obj.bulk, obj.lame);
+            elseif obj.use_3D_mex
                 [obj.S, obj.DS] = CONSTITUTIVE_PROBLEM.constitutive_problem_3D_SDS_mex(E, obj.c_bar, obj.sin_phi, obj.shear, obj.bulk, obj.lame);
             elseif obj.dim == 2
                 [obj.S, obj.DS] = CONSTITUTIVE_PROBLEM.constitutive_problem_2D(E, obj.c_bar, obj.sin_phi, obj.shear, obj.bulk, obj.lame);
@@ -533,6 +547,14 @@ classdef CONSTITUTIVE < handle
             % DPhi2  - global basis derivatives d/dx2 (n_p x n_int)
             % DPhi3  - global basis derivatives d/dx3 (n_p x n_int)
             %--------------------------------------------------------------------------
+            if (nargin < 5) || isempty(DPhi3)
+                if obj.dim == 2
+                    DPhi3 = zeros(size(DPhi1));
+                else
+                    error('DPhi3 is required for 3D element data.');
+                end
+            end
+
             obj.elem_ELEM  = ELEM;
             obj.elem_DPhi1 = DPhi1;
             obj.elem_DPhi2 = DPhi2;
@@ -543,7 +565,11 @@ classdef CONSTITUTIVE < handle
             obj.elem_data_set = true;
             this_pkg_dir = fileparts(mfilename('fullpath'));
             root_dir = fileparts(this_pkg_dir);
-            obj.elem_use_mex = (exist(fullfile(root_dir, '+ASSEMBLY', 'assemble_K_tangent_vals.mex'), 'file') == 3);
+            if obj.dim == 2
+                obj.elem_use_mex = (exist(fullfile(root_dir, '+ASSEMBLY', 'assemble_K_tangent_vals_2D.mex'), 'file') == 3);
+            else
+                obj.elem_use_mex = (exist(fullfile(root_dir, '+ASSEMBLY', 'assemble_K_tangent_vals.mex'), 'file') == 3);
+            end
             fprintf('Element data set: n_p=%d, n_e=%d, n_q=%d, mex=%d\n', ...
                 obj.elem_n_p, obj.elem_n_e, obj.elem_n_q, obj.elem_use_mex);
 
@@ -616,10 +642,17 @@ classdef CONSTITUTIVE < handle
             %--------------------------------------------------------------------------
             nnz_out = numel(obj.ref_I);
             if obj.elem_use_mex
-                V_tang = ASSEMBLY.assemble_K_tangent_vals( ...
-                    obj.elem_DPhi1, obj.elem_DPhi2, obj.elem_DPhi3, ...
-                    obj.DS, obj.WEIGHT, obj.elem_scatter_map, ...
-                    int32(obj.elem_n_q), int32(nnz_out));
+                if obj.dim == 2
+                    V_tang = ASSEMBLY.assemble_K_tangent_vals_2D( ...
+                        obj.elem_DPhi1, obj.elem_DPhi2, ...
+                        obj.DS, obj.WEIGHT, obj.elem_scatter_map, ...
+                        int32(obj.elem_n_q), int32(nnz_out));
+                else
+                    V_tang = ASSEMBLY.assemble_K_tangent_vals( ...
+                        obj.elem_DPhi1, obj.elem_DPhi2, obj.elem_DPhi3, ...
+                        obj.DS, obj.WEIGHT, obj.elem_scatter_map, ...
+                        int32(obj.elem_n_q), int32(nnz_out));
+                end
             else
                 V_tang = obj.build_K_tangent_QQ_vals_octave();
             end
@@ -648,20 +681,34 @@ classdef CONSTITUTIVE < handle
 
                     % Build local B_eq (ns x n_local_dof)
                     B_eq = zeros(ns, n_local_dof);
-                    for i = 1:np
-                        dN1 = obj.elem_DPhi1(i, g);
-                        dN2 = obj.elem_DPhi2(i, g);
-                        dN3 = obj.elem_DPhi3(i, g);
-                        c = (i - 1) * 3;
-                        B_eq(1, c+1) = dN1;
-                        B_eq(2, c+2) = dN2;
-                        B_eq(3, c+3) = dN3;
-                        B_eq(4, c+1) = dN2;
-                        B_eq(4, c+2) = dN1;
-                        B_eq(5, c+2) = dN3;
-                        B_eq(5, c+3) = dN2;
-                        B_eq(6, c+1) = dN3;
-                        B_eq(6, c+3) = dN1;
+                    if obj.dim == 2
+                        for i = 1:np
+                            dN1 = obj.elem_DPhi1(i, g);
+                            dN2 = obj.elem_DPhi2(i, g);
+                            c = (i - 1) * 2;
+                            B_eq(1, c+1) = dN1;
+                            B_eq(2, c+2) = dN2;
+                            B_eq(3, c+1) = dN2;
+                            B_eq(3, c+2) = dN1;
+                        end
+                    elseif obj.dim == 3
+                        for i = 1:np
+                            dN1 = obj.elem_DPhi1(i, g);
+                            dN2 = obj.elem_DPhi2(i, g);
+                            dN3 = obj.elem_DPhi3(i, g);
+                            c = (i - 1) * 3;
+                            B_eq(1, c+1) = dN1;
+                            B_eq(2, c+2) = dN2;
+                            B_eq(3, c+3) = dN3;
+                            B_eq(4, c+1) = dN2;
+                            B_eq(4, c+2) = dN1;
+                            B_eq(5, c+2) = dN3;
+                            B_eq(5, c+3) = dN2;
+                            B_eq(6, c+1) = dN3;
+                            B_eq(6, c+3) = dN1;
+                        end
+                    else
+                        error('Unsupported dimension %d for element-level assembly.', obj.dim);
                     end
                     Ke = Ke + B_eq' * D_eq * B_eq;
                 end

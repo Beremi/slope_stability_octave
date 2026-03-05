@@ -131,23 +131,19 @@ classdef DFGMRES < handle
             if ~isempty(obj.profiler), obj.profiler.add_time('DFGMRES.A_orthogonalize', elapsed_time); end
         end
 
-        function [u] = solve(obj, A, b)
+        function [u, nit] = solve(obj, A, b)
             %--------------------------------------------------------------------------
             % solve computes the solution u of the linear system A*u = b.
             %
-            %   u = obj.solve(A, b)
+            %   [u, nit] = obj.solve(A, b)
             %
             % This method wraps the core flexible GMRES solver, records the number
-            % of iterations and time taken, and optionally prints verbose output.
+            % of iterations and time taken.
             %--------------------------------------------------------------------------
             t_start = tic;
             [u, nit] = obj.solve_core(A, b);
             elapsed_time = toc(t_start);
             if ~isempty(obj.profiler), obj.profiler.add_time('DFGMRES.solve', elapsed_time); end
-
-            if obj.verbose
-                fprintf('%d|', nit);
-            end
         end
 
         function [u, nit] = solve_core(obj, A, b)

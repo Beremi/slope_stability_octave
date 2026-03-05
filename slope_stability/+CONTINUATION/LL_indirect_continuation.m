@@ -64,9 +64,6 @@ step = 1;
 
 % Main continuation loop.
 while true
-    
-    fprintf('\nStep = %d\n', step+1);
-    
     % Try to increase the control parameter by d_omega.
     omega_it = omega + d_omega;
     if omega_it > omega_max
@@ -74,6 +71,7 @@ while true
         omega_it = omega_max;
         d_omega  = omega_it - omega; 
     end
+    fprintf('Step %d: omega_target=%.6g, d_omega=%.6g\n', step + 1, omega_it, d_omega);
 
     % Simple initial guess for this step.
     if step > 1
@@ -92,6 +90,7 @@ while true
     
     % Check convergence of the Newton solver.
     if flag == 1  % Solver was not successful.
+        fprintf('  retry: reducing d_omega from %.6g to %.6g\n', d_omega, d_omega / 2);
         d_omega = d_omega / 2;
         n_omega = n_omega + 1;
     else
@@ -117,12 +116,12 @@ while true
         U_max_hist(step) = U_max;
         
         % Display iteration information.
-        fprintf('   t = %g, d_t = %g, omega = %g, d_omega = %g, U_max = %g\n', ...
+        fprintf('  accepted: t=%.6g, d_t=%.6g, omega=%.6g, d_omega=%.6g, U_max=%.6g\n', ...
                 t, d_t, omega, d_omega, U_max);
         
         % If the scaled increase in lambda is minimal, stop continuation.
         if (d_t < d_t_min)
-            disp('Minimal increment of lambda was achieved.');
+            fprintf('Stop: minimal increment of t achieved.\n');
             break;
         end
         
@@ -135,11 +134,11 @@ while true
     
     % Stopping criteria.
     if n_omega >= n_omega_max
-        disp('It is impossible to increase omega further (max reductions reached).');
+        fprintf('Stop: impossible to increase omega further (max reductions reached).\n');
         break;
     end
     if omega >= omega_max
-        disp('Maximal omega was achieved.');
+        fprintf('Stop: maximal omega achieved.\n');
         break;
     end
     % if U_max > U_max_stop
@@ -147,7 +146,7 @@ while true
     %     break;
     % end
     if step >= step_max
-        disp('Maximal number of steps was reached.');
+        fprintf('Stop: maximal number of steps reached.\n');
         break;
     end
 

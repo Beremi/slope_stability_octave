@@ -36,6 +36,15 @@ it = 0;
 residual_history = nan(1, it_newt_max);
 r_history = nan(1, it_newt_max);
 alpha_history = nan(1, it_newt_max);
+rel_resid = NaN;
+alpha = NaN;
+status_msg = 'unknown';
+last_progress_chars = 0;
+lin_it_w_total = 0;
+lin_it_v_total = 0;
+lin_it_w_history = zeros(1, it_newt_max);
+lin_it_v_history = zeros(1, it_newt_max);
+t_newton_start = tic;
 
 % One-time: restrict B to free DOFs and build maximal sparsity pattern.
 if ~constitutive_matrix_builder.pattern_initialized
@@ -51,6 +60,8 @@ K_J_sym = constitutive_matrix_builder.ref_J(upper_mask);
 
 % Flag for HYPRE IJV pattern reuse: first call does full setup,
 % subsequent calls only update values (same sparsity pattern).
+can_reuse_ijv = ~isempty(linear_solver.preconditioner_initializator) && ...
+                ~isempty(linear_solver.preconditioner_updater);
 hypre_pattern_initialized = false;
 
 % Semismooth Newton loop.
@@ -67,7 +78,7 @@ while true
         residual_history(it) = rel_resid;
 
         if (rel_resid < tol) && (it > 1)
-            fprintf('Newton method converges: iteration = %d, rel. resid = %e\n', it, rel_resid);
+            status_msg = 'converged';
             break;
         end
     end
@@ -84,18 +95,28 @@ while true
     F_eps = constitutive_matrix_builder.build_F_all(lambda_eps, U_it);
     G = (F_eps - F) / eps;
 
-    %% Setup/update preconditioner (HYPRE reuses sparsity pattern after first call).
-    if ~hypre_pattern_initialized
-        linear_solver.setup_preconditioner_ijv(K_I, K_J, K_V, n_Q);
-        hypre_pattern_initialized = true;
+    %% Setup/update preconditioner (HYPRE IJV path if available).
+    if can_reuse_ijv
+        if ~hypre_pattern_initialized
+            linear_solver.setup_preconditioner_ijv(K_I, K_J, K_V, n_Q);
+            hypre_pattern_initialized = true;
+        else
+            linear_solver.update_preconditioner_values(K_V);
+        end
     else
-        linear_solver.update_preconditioner_values(K_V);
+        linear_solver.setup_preconditioner(K_rQQ);
     end
 
     linear_solver.A_orthogonalize(K_rQQ);
 
-    W(Q) = linear_solver.solve(K_rQQ, -G(Q));
-    V(Q) = linear_solver.solve(K_rQQ, f(Q) - F(Q));
+    [W_Q, lin_it_w] = linear_solver.solve(K_rQQ, -G(Q));
+    [V_Q, lin_it_v] = linear_solver.solve(K_rQQ, f(Q) - F(Q));
+    W(Q) = W_Q;
+    V(Q) = V_Q;
+    lin_it_w_total = lin_it_w_total + lin_it_w;
+    lin_it_v_total = lin_it_v_total + lin_it_v;
+    lin_it_w_history(it) = lin_it_w;
+    lin_it_v_history(it) = lin_it_v;
 
     d_l = - (f(Q)' * V(Q)) / (f(Q)' * W(Q));
     d_U = V + d_l * W;
@@ -122,7 +143,7 @@ while true
     end
 
     if (alpha == 0) && (r > 1)
-        fprintf('\nNewton solver does not converge: iteration = %d, stopping criterion=%e\n', it, rel_resid);
+        status_msg = 'stalled_regularization';
         if rel_resid > 10 * tol
             flag_N = 1;
         end
@@ -134,22 +155,52 @@ while true
     U_it = omega * U_it / (f(Q)' * U_it(Q));  % Enforce constraint
     lambda_it = lambda_it + alpha * d_l;
 
-    fprintf('  newton_ind_SSR it=%d  resid=%.2e  alpha=%.2f  r=%.3g  step_time=%.2f s\n', ...
-        it, rel_resid, alpha, r, toc(t_step));
+    progress_line = sprintf(['  newton_ind_SSR it=%d  rel_resid=%.2e  alpha=%.2f  r=%.3g', ...
+        '  lin_it=[W:%d,V:%d]  step_time=%.2f s'], ...
+        it, rel_resid, alpha, r, lin_it_w, lin_it_v, toc(t_step));
+    last_progress_chars = local_print_progress(progress_line, last_progress_chars);
 
     %% Check maximum iterations.
-    if it == it_newt_max
-        fprintf('Newton solver does not converge: iteration = %d, stopping criterion=%e\n', it, rel_resid);
+    if isnan(rel_resid) || (it == it_newt_max)
         if rel_resid > 10 * tol
             flag_N = 1;
+        end
+        if isnan(rel_resid)
+            status_msg = 'nan_residual';
+        else
+            status_msg = 'max_iterations';
         end
         break;
     end
 end % while
 
+newton_wall_time = toc(t_newton_start);
+local_finish_progress(last_progress_chars);
+fprintf(['newton_ind_SSR summary: status=%s, it=%d, rel_resid=%e, ', ...
+    'lin_it_total=[W:%d,V:%d], wall_time=%.2f s\n'], ...
+    status_msg, it, rel_resid, lin_it_w_total, lin_it_v_total, newton_wall_time);
+
 % Trim unused history entries
 history.residual = residual_history(1:it);
 history.r = r_history(1:it);
 history.alpha = alpha_history(1:it);
+history.linear_iters_W = lin_it_w_history(1:it);
+history.linear_iters_V = lin_it_v_history(1:it);
+history.linear_iters_W_total = lin_it_w_total;
+history.linear_iters_V_total = lin_it_v_total;
+history.wall_time = newton_wall_time;
 
 end % function
+
+function last_chars = local_print_progress(msg, last_chars)
+pad = max(0, last_chars - numel(msg));
+fprintf('\r%s%s', msg, repmat(' ', 1, pad));
+fflush(stdout);
+last_chars = numel(msg);
+end
+
+function local_finish_progress(last_chars)
+if last_chars > 0
+    fprintf('\r%s\r', repmat(' ', 1, last_chars));
+end
+end

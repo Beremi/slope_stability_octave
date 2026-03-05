@@ -1,4 +1,4 @@
-function fig = plot_displacements_3D(U, coord, elem,surf, scale_factor)
+function fig = plot_displacements_3D(U, coord, elem, surf, scale_factor)
 %--------------------------------------------------------------------------
 % plot_displacements_3D plots the 3D displacement field on the mesh.
 %
@@ -28,8 +28,19 @@ function fig = plot_displacements_3D(U, coord, elem,surf, scale_factor)
 %
 %--------------------------------------------------------------------------
 
-if nargin < 4
+% Backward compatibility:
+%   old API: plot_displacements_3D(U, coord, elem)
+%            plot_displacements_3D(U, coord, elem, scale_factor)
+%   new API: plot_displacements_3D(U, coord, elem, surf, scale_factor)
+if nargin < 4 || isempty(surf)
+    surf = [];
+end
+if nargin < 5 || isempty(scale_factor)
     scale_factor = 0.05;
+end
+if nargin == 4 && isnumeric(surf) && isscalar(surf)
+    scale_factor = surf;
+    surf = [];
 end
 
 %%
@@ -60,6 +71,8 @@ scale = scale_factor;
 
 % Plot displacements with color representing the norm of the displacement.
 fig = VIZ.draw_quantity_3D(coord_boundary, boundary_faces, [U_x_face; U_y_face; U_z_face] * scale, values_boundary);
-VIZ.compute_bounding_edges(surf, coord, 1);
+if ~isempty(surf)
+    VIZ.compute_bounding_edges(surf, coord, 1);
+end
 title("Displacements (color = norm of displacement)")
 end

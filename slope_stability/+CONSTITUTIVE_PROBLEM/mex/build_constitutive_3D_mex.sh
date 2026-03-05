@@ -1,11 +1,13 @@
 #!/bin/bash
-# Build the constitutive_problem_3D mex files for Octave.
+# Build the constitutive_problem 2D/3D mex files for Octave.
 # Run from the slope_stability/ directory.
 #
 # Usage:
 #   bash +CONSTITUTIVE_PROBLEM/mex/build_constitutive_3D_mex.sh
 #
-# Produces two .mex files in +CONSTITUTIVE_PROBLEM/:
+# Produces four .mex files in +CONSTITUTIVE_PROBLEM/:
+#   constitutive_problem_2D_S_mex.mex     (stress only)
+#   constitutive_problem_2D_SDS_mex.mex   (stress + consistent tangent)
 #   constitutive_problem_3D_S_mex.mex     (stress only)
 #   constitutive_problem_3D_SDS_mex.mex   (stress + consistent tangent)
 
@@ -24,22 +26,25 @@ else
     exit 1
 fi
 
-echo "Compiling constitutive_problem_3D_S_mex.c ..."
-$MKOCTFILE --mex -O2 \
-    -DHAVE_OPENMP \
-    -I"$SCRIPT_DIR" \
-    "$SCRIPT_DIR/constitutive_problem_3D_S_mex.c" \
-    -o "$OUT_DIR/constitutive_problem_3D_S_mex.mex" \
-    -fopenmp -lgomp
+compile_one () {
+    local src="$1"
+    local out="$2"
+    echo "Compiling $(basename "$src") ..."
+    $MKOCTFILE --mex -O2 \
+        -DHAVE_OPENMP \
+        -I"$SCRIPT_DIR" \
+        "$src" \
+        -o "$out" \
+        -fopenmp -lgomp
+}
 
-echo "Compiling constitutive_problem_3D_SDS_mex.c ..."
-$MKOCTFILE --mex -O2 \
-    -DHAVE_OPENMP \
-    -I"$SCRIPT_DIR" \
-    "$SCRIPT_DIR/constitutive_problem_3D_SDS_mex.c" \
-    -o "$OUT_DIR/constitutive_problem_3D_SDS_mex.mex" \
-    -fopenmp -lgomp
+compile_one "$SCRIPT_DIR/constitutive_problem_2D_S_mex.c" "$OUT_DIR/constitutive_problem_2D_S_mex.mex"
+compile_one "$SCRIPT_DIR/constitutive_problem_2D_SDS_mex.c" "$OUT_DIR/constitutive_problem_2D_SDS_mex.mex"
+compile_one "$SCRIPT_DIR/constitutive_problem_3D_S_mex.c" "$OUT_DIR/constitutive_problem_3D_S_mex.mex"
+compile_one "$SCRIPT_DIR/constitutive_problem_3D_SDS_mex.c" "$OUT_DIR/constitutive_problem_3D_SDS_mex.mex"
 
 echo "Done.  Outputs:"
+echo "  $OUT_DIR/constitutive_problem_2D_S_mex.mex"
+echo "  $OUT_DIR/constitutive_problem_2D_SDS_mex.mex"
 echo "  $OUT_DIR/constitutive_problem_3D_S_mex.mex"
 echo "  $OUT_DIR/constitutive_problem_3D_SDS_mex.mex"

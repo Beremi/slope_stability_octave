@@ -78,12 +78,9 @@ d_lambda = lambda - lambda_init;   % Current increment of lambda.
 %
 step = 2;     % Current number of continuation steps.
 while true
-    fprintf('\n');
-    fprintf(' Step = %d  ', step + 1);
-    fprintf('\n');
-    
     % Update of the parameter lambda.
     lambda_it = lambda + d_lambda;
+    fprintf('Step %d: lambda_target=%.6g\n', step + 1, lambda_it);
     
     % Computation of U and omega for given lambda_it.
     [U_it, omega_it, flag] = CONTINUATION.omega_SSR_direct_continuation(...
@@ -95,6 +92,7 @@ while true
     d_omega_test = omega_it - omega_hist(step);
     if (flag == 1) || (d_omega_test < 0)
         % The solver was not successful - decrease d_lambda.
+        fprintf('  retry: reducing d_lambda from %.6g to %.6g\n', d_lambda, d_lambda / 2);
         d_lambda = d_lambda / 2;
     % elseif d_omega_test > 2*d_omega
     %     % too large increment of omega
@@ -110,15 +108,13 @@ while true
         work_hist(step) = dot(U(:), f(:));
         linear_system_solver.expand_deflation_basis(U(Q));
         % Display of outputs.
-        disp(['   lambda = ', num2str(lambda), ...
-            ', d_lambda = ', num2str(d_lambda), ...
-            ', omega = ', num2str(omega), ...
-            ', d_omega = ', num2str(d_omega), ...
-            ', d_lambda_diff_scaled = ', num2str(d_lambda/d_omega_test*(omega_hist(step) - omega_hist(1))), ...
-            ', U_max = ', num2str(Umax_hist(step))]);
+        fprintf(['  accepted: lambda=%.6g, d_lambda=%.6g, omega=%.6g, d_omega=%.6g, ', ...
+            'd_lambda_diff_scaled=%.6g, U_max=%.6g\n'], ...
+            lambda, d_lambda, omega, d_omega, ...
+            d_lambda / d_omega_test * (omega_hist(step) - omega_hist(1)), Umax_hist(step));
         
         if (d_lambda / d_omega_test) * (omega_hist(step) - omega_hist(1)) < d_lambda_diff_scaled_min
-            disp('Minimal increase of lambda was achieved.');
+            fprintf('Stop: minimal increase of lambda achieved.\n');
             break;
         end
         
@@ -131,11 +127,11 @@ while true
     
     % Stopping criteria.
     if d_lambda < d_lambda_min
-        disp('Minimal increment of lambda was achieved.');
+        fprintf('Stop: minimal increment of lambda achieved.\n');
         break;
     end
     if step >= step_max
-        disp('Maximal number of steps was achieved.');
+        fprintf('Stop: maximal number of steps achieved.\n');
         break;
     end
     
