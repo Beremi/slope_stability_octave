@@ -3,7 +3,6 @@ FROM mcr.microsoft.com/devcontainers/base:ubuntu-24.04
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Etc/UTC
 ENV REQUIRE_QT_TOOLKIT=1
-ENV SLOPE_STABILITY_REPO=/workspaces/slope_stability
 
 USER root
 
@@ -65,7 +64,7 @@ COPY .devcontainer/auto-activate.sh /usr/local/share/slope-stability/auto-activa
 
 RUN chmod 0644 /usr/local/share/slope-stability/auto-activate.sh \
     && printf '\n# Auto-activate local slope_stability toolchain when present\nsource /usr/local/share/slope-stability/auto-activate.sh\n' >> /etc/bash.bashrc \
-    && mkdir -p /workspaces/slope_stability
+    && mkdir -p /workspaces
 
-WORKDIR /workspaces/slope_stability
+WORKDIR /workspaces
 USER vscode

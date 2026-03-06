@@ -1,6 +1,35 @@
 # Slope Stability Using LL and SSR Methods
 
-This repository contains MATLAB/Octave scripts for analyzing **slope stability problems** in 2D and 3D using the **Limit Load (LL)** and **Shear Strength Reduction (SSR)** methods. The code supports various configurations of **finite elements**, **material models**, **continuation methods**, and **linear solvers**.
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/Beremi/slope_stability_octave?quickstart=1)
+
+This repository contains **MATLAB-compatible** scripts for analyzing **slope stability problems** in 2D and 3D using the **Limit Load (LL)** and **Shear Strength Reduction (SSR)** methods. The code supports various configurations of **finite elements**, **material models**, **continuation methods**, and **linear solvers**.
+
+The project is now set up for a **fully open-source Linux workflow** through the included **devcontainer / GitHub Codespaces** environment. That workflow builds a local **GNU Octave + OpenBLAS + librsb + HYPRE + MEX + Jupyter** stack inside the repository, so the main demos, notebooks, and HYPRE-based solver path can run **without a MATLAB license**. Native MATLAB usage remains supported as an optional path.
+
+---
+
+## Open-Source Quick Start
+
+Recommended path: open the repository in **GitHub Codespaces** from the badge above, or in a local **devcontainer** on Linux / WSL2.
+
+- The devcontainer requests a **16-core / 32 GB RAM / 64 GB storage** machine class so the local Octave + HYPRE build is practical.
+- Codespaces prebuilds run the repository bootstrap during the prebuild lifecycle, so a fresh codespace can start with `.octave_all/` and `.venv/` already prepared.
+- New interactive `bash` sessions auto-activate the repository `.venv`, and when the local Octave stack is present they also export the Octave runtime automatically.
+
+Typical first commands inside a ready codespace or devcontainer:
+
+```bash
+cd slope_stability
+octave-cli slope_stability_2D_homo_SSR.m
+```
+
+To work with notebooks:
+
+```bash
+jupyter lab
+```
+
+Select the **Octave (local-rsb)** kernel.
 
 ---
 
@@ -40,12 +69,25 @@ benchmark_octave/           ← Performance benchmarks
 
 ---
 
-## ⚙️ Dependencies
+## ⚙️ Runtime Options And Dependencies
 
-- **MATLAB** (recommended version R2020b or newer).
-- [**AGMG** (Algebraic Multigrid)](https://agmg.eu/) – *Optional but recommended* for best performance.
-  - AGMG is **not open-source**, but an **academic license is available for free** upon request.
-  - After obtaining AGMG, place the files (for linux its 'agmg.m, dmtlagmg.mexa64, zmtlagmg.mexa64') into `agmg` folder in the  'slope_stability' directory of the repository.
+### Recommended: fully open-source Linux / Codespaces path
+
+- No MATLAB license is required.
+- The repository devcontainer builds and uses:
+  - **GNU Octave 11.1**
+  - **OpenBLAS**
+  - **librsb + sparsersb**
+  - **HYPRE BoomerAMG** (OpenMP, no MPI)
+  - repository-local **MEX / oct-file** builds
+  - a repository-local **Jupyter** environment
+
+### Native MATLAB path
+
+- **MATLAB** (recommended version R2020b or newer) remains supported.
+- [**AGMG** (Algebraic Multigrid)](https://agmg.eu/) is still available as an **optional** MATLAB solver backend.
+  - AGMG is **not open-source** and is **not required** for the open-source Octave/HYPRE workflow.
+  - After obtaining AGMG, place the Linux files (`agmg.m`, `dmtlagmg.mexa64`, `zmtlagmg.mexa64`) into the `slope_stability/agmg/` folder.
 
 ---
 
@@ -140,7 +182,7 @@ Notes:
 
 
 ---
-## � GNU Octave Support (Local Optimized Build)
+## GNU Octave Support (Local Optimized Build)
 
 The code runs on **GNU Octave** (tested with 11.1) in addition to MATLAB. A fully automated build pipeline compiles an optimized local Octave stack with all numerical dependencies.
 
@@ -201,22 +243,24 @@ jupyter lab                        # open in browser
 
 Open `slope_stability/slope_stability_3D_hetero_seepage_SSR_comsol_demo.ipynb` and select the **Octave (local-rsb)** kernel.
 
-### Devcontainer and Docker
+### Devcontainer, Codespaces, and Docker
 
 A repo-level [`Dockerfile`](Dockerfile) and [`.devcontainer/devcontainer.json`](.devcontainer/devcontainer.json) are included for a reproducible container setup.
 
-- In a Dev Container, first creation runs `./bootstrap_all.sh --no-clean --no-verify` from `.devcontainer/post-create.sh`, so the heavy local stack is built inside the mounted workspace instead of being hidden in the image layer.
+- The devcontainer uses the actual repo basename under `/workspaces/`, so it works in Codespaces even when the repository is not named exactly `slope_stability`.
+- Codespaces prebuilds run `.devcontainer/post-create.sh` via `updateContentCommand`, so the heavy local stack is built into the prebuild workspace snapshot and is ready when a codespace starts.
+- The devcontainer declares a minimum **16-core / 32 GB / 64 GB** machine profile for Codespaces.
 - Each new interactive `bash` session auto-exports the local Octave runtime and the repo `.venv` when those directories exist.
 - The container image includes `gnuplot-nox` for headless shell plotting, and the Jupyter kernel uses an Xvfb-backed wrapper so notebooks can keep preferring the `qt` graphics toolkit even without a real desktop display.
-- If the repo already contains `.octave_all/` or `.venv/` from a different absolute path, the devcontainer bootstrap detects that and rebuilds them once so the wrapper scripts and Jupyter kernel point at `/workspaces/slope_stability`.
+- If the repo already contains `.octave_all/` or `.venv/` from a different absolute path, the devcontainer bootstrap detects that and rebuilds them once so the wrapper scripts and Jupyter kernel point at the current `/workspaces/<repo-name>` mount.
 
 Plain Docker usage:
 
 ```bash
 docker build -t slope-stability-dev .
 docker run --rm -it \
-  -e SLOPE_STABILITY_REPO=/workspaces/slope_stability \
-  -v "$PWD":/workspaces/slope_stability \
+  -v "$PWD":"/workspaces/$(basename "$PWD")" \
+  -e SLOPE_STABILITY_REPO="/workspaces/$(basename "$PWD")" \
   slope-stability-dev bash
 ```
 

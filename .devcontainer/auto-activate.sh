@@ -8,7 +8,16 @@ if [[ "${SLOPE_STABILITY_ENV_ACTIVATED:-0}" == "1" ]]; then
   return 0
 fi
 
-repo_root="${SLOPE_STABILITY_REPO:-/workspaces/slope_stability}"
+repo_root="${SLOPE_STABILITY_REPO:-}"
+if [[ -z "${repo_root}" || ! -f "${repo_root}/bootstrap_all.sh" || ! -d "${repo_root}/setup" ]]; then
+  detected_root="$(git -C "${PWD}" rev-parse --show-toplevel 2>/dev/null || true)"
+  if [[ -n "${detected_root}" && -f "${detected_root}/bootstrap_all.sh" && -d "${detected_root}/setup" ]]; then
+    repo_root="${detected_root}"
+  else
+    return 0
+  fi
+fi
+
 activated=0
 
 install_root="${repo_root}/.octave_all/install"

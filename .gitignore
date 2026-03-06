@@ -12,13 +12,8 @@ poznamky_*.docx
 *.mat
 
 # Built MEX binaries (Octave .mex and MATLAB .mexa64)
-slope_stability/+LINEAR_SOLVERS/hypre_boomeramg_mex.mex
-slope_stability/+LINEAR_SOLVERS/hypre_boomeramg_mex.mexa64
-slope_stability/+CONSTITUTIVE_PROBLEM/constitutive_problem_3D_S_mex.mex
-slope_stability/+CONSTITUTIVE_PROBLEM/constitutive_problem_3D_SDS_mex.mex
-slope_stability/+ASSEMBLY/assemble_K_tangent_vals.mex
-# Legacy location (MATLAB)
-slope_stability/hypre_boomeramg_mex.mexa64
+slope_stability/**/*.mex
+slope_stability/**/*.mexa64
 
 # Local build artifacts
 bin/
@@ -33,7 +28,3 @@ benchmark_octave/benchmark_octave/
 
 # Generated activation script
 setup/activate_optimized_octave.sh
-slope_stability/+CONSTITUTIVE_PROBLEM/constitutive_problem_2D_SDS_mex.mex
-slope_stability/+CONSTITUTIVE_PROBLEM/constitutive_problem_2D_S_mex.mex
-slope_stability/+ASSEMBLY/assemble_K_tangent_vals_2D.mex
-slope_stability/+ASSEMBLY/assemble_K_tangent_vals_2D.mex

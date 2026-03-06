@@ -4,24 +4,34 @@
     "dockerfile": "../Dockerfile",
     "context": ".."
   },
+  "hostRequirements": {
+    "cpus": 16,
+    "memory": "32gb",
+    "storage": "64gb"
+  },
   "containerEnv": {
-    "SLOPE_STABILITY_REPO": "/workspaces/slope_stability"
+    "SLOPE_STABILITY_REPO": "/workspaces/${localWorkspaceFolderBasename}"
   },
   "customizations": {
+    "codespaces": {
+      "openFiles": [
+        "README.md"
+      ]
+    },
     "vscode": {
       "extensions": [
         "ms-python.python",
         "ms-toolsai.jupyter"
       ],
       "settings": {
-        "python.defaultInterpreterPath": "/workspaces/slope_stability/.venv/bin/python",
+        "python.defaultInterpreterPath": "/workspaces/${localWorkspaceFolderBasename}/.venv/bin/python",
         "python.terminal.activateEnvironment": false,
         "terminal.integrated.defaultProfile.linux": "bash"
       }
     }
   },
-  "postCreateCommand": "bash .devcontainer/post-create.sh",
+  "updateContentCommand": "bash .devcontainer/post-create.sh",
   "remoteUser": "vscode",
   "updateRemoteUserUID": true,
-  "workspaceFolder": "/workspaces/slope_stability"
+  "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}"
 }
