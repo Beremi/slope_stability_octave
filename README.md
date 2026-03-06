@@ -12,9 +12,9 @@ The project is now set up for a **fully open-source Linux workflow** through the
 
 Recommended path: open the repository in **GitHub Codespaces** from the badge above, or in a local **devcontainer** on Linux / WSL2.
 
-- The devcontainer requests a **16-core / 32 GB RAM / 64 GB storage** machine class so the local Octave + HYPRE build is practical.
+- The devcontainer no longer pins a Codespaces machine size, so you can choose the hardware profile that fits your budget and workload.
 - Codespaces prebuilds run the repository bootstrap during the prebuild lifecycle, so a fresh codespace can start with `.octave_all/` and `.venv/` already prepared.
-- New interactive `bash` sessions auto-activate the repository `.venv`, and when the local Octave stack is present they also export the Octave runtime automatically.
+- New interactive `bash` sessions auto-activate the repository `.venv`, and when the local Octave stack is present they also export the Octave runtime automatically with `OMP_NUM_THREADS` set to the current system core count unless you override it.
 
 Typical first commands inside a ready codespace or devcontainer:
 
@@ -223,7 +223,7 @@ After a successful build, activate the local Octave in any terminal session:
 source setup/activate_optimized_octave.sh
 ```
 
-This sets `PATH`, `LD_LIBRARY_PATH`, and `OMP_NUM_THREADS` (default 16). The activation is required before running any Octave command or Jupyter notebook.
+This sets `PATH`, `LD_LIBRARY_PATH`, and `OMP_NUM_THREADS` (auto-detected from the current machine unless you override it). The activation is required before running any Octave command or Jupyter notebook.
 
 ### Running simulations
 
@@ -249,11 +249,12 @@ A repo-level [`Dockerfile`](Dockerfile) and [`.devcontainer/devcontainer.json`](
 
 - The devcontainer uses the actual repo basename under `/workspaces/`, so it works in Codespaces even when the repository is not named exactly `slope_stability`.
 - Codespaces prebuilds run `.devcontainer/post-create.sh` via `updateContentCommand`, so the heavy local stack is built into the prebuild workspace snapshot and is ready when a codespace starts.
-- The devcontainer declares a minimum **16-core / 32 GB / 64 GB** machine profile for Codespaces.
-- VS Code inside the devcontainer installs the Jupyter, Jupyter Renderers, Octave, and MATLAB language extensions so notebooks and `.m` files are ready without extra editor setup.
+- The devcontainer leaves the Codespaces machine size up to you; the runtime wrappers and Jupyter kernel detect the current CPU count automatically instead of baking in `16` threads.
+- VS Code inside the devcontainer installs the Jupyter, Jupyter Renderers, `toasty-technologies.octave`, `paulosilva.vsc-octave-debugger`, and `lucasfa.octaveexecution` extensions so notebooks and `.m` files are ready without extra editor setup.
 - Each new interactive `bash` session auto-exports the local Octave runtime and the repo `.venv` when those directories exist.
 - The container image includes `gnuplot-nox` for headless shell plotting, and the Jupyter kernel uses an Xvfb-backed wrapper so notebooks can keep preferring the `qt` graphics toolkit even without a real desktop display.
 - The image also includes a TeX runtime with `dvipng`, `dvisvgm`, and the `standalone` LaTeX class so Octave plots using `Interpreter='latex'` render correctly in notebooks and exported figures.
+- The prebuild bootstrap also installs the Octave Forge `matgeom` and `geometry` packages, so functions such as `delaunay` are available in the local Octave environment.
 - If the repo already contains `.octave_all/` or `.venv/` from a different absolute path, the devcontainer bootstrap detects that and rebuilds them once so the wrapper scripts and Jupyter kernel point at the current `/workspaces/<repo-name>` mount.
 
 Plain Docker usage:

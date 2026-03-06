@@ -4,11 +4,6 @@
     "dockerfile": "../Dockerfile",
     "context": ".."
   },
-  "hostRequirements": {
-    "cpus": 16,
-    "memory": "32gb",
-    "storage": "64gb"
-  },
   "containerEnv": {
     "SLOPE_STABILITY_REPO": "/workspaces/${localWorkspaceFolderBasename}"
   },
@@ -20,8 +15,9 @@
     },
     "vscode": {
       "extensions": [
-        "Kronuz.octave",
-        "MathWorks.language-matlab",
+        "toasty-technologies.octave",
+        "paulosilva.vsc-octave-debugger",
+        "lucasfa.octaveexecution",
         "ms-python.python",
         "ms-toolsai.jupyter",
         "ms-toolsai.jupyter-renderers"

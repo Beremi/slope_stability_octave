@@ -9,6 +9,7 @@ required_paths=(
   ".octave_all/bin/octave-rsb-jupyter"
   ".venv/bin/python"
   ".venv/bin/activate"
+  ".venv/share/jupyter/kernels/octave-local-rsb/kernel.json"
   "setup/activate_optimized_octave.sh"
   "slope_stability/+LINEAR_SOLVERS/hypre_boomeramg_mex.mex"
   "slope_stability/+CONSTITUTIVE_PROBLEM/constitutive_problem_3D_SDS_mex.mex"
@@ -16,6 +17,7 @@ required_paths=(
 )
 
 needs_clean=0
+needs_bootstrap=0
 
 relocatable_path_matches() {
   local file_path="$1"
@@ -44,6 +46,10 @@ if [[ -e "${ROOT_DIR}/.venv/bin/activate" ]] && ! relocatable_path_matches "${RO
   needs_clean=1
 fi
 
+if [[ -e "${ROOT_DIR}/setup/activate_optimized_octave.sh" ]] && ! relocatable_path_matches "${ROOT_DIR}/setup/activate_optimized_octave.sh" ".octave_all/env.sh"; then
+  needs_bootstrap=1
+fi
+
 if [[ "${REQUIRE_QT_TOOLKIT:-0}" == "1" ]]; then
   octave_config_h="$(find_octave_config_header)"
   if [[ -z "${octave_config_h}" ]]; then
@@ -53,7 +59,24 @@ if [[ "${REQUIRE_QT_TOOLKIT:-0}" == "1" ]]; then
   fi
 fi
 
-needs_bootstrap=0
+if [[ -e "${ROOT_DIR}/.octave_all/env.sh" ]] && grep -Fq 'OMP_NUM_THREADS:-16' "${ROOT_DIR}/.octave_all/env.sh"; then
+  needs_bootstrap=1
+fi
+
+if [[ -e "${ROOT_DIR}/.venv/share/jupyter/kernels/octave-local-rsb/kernel.json" ]] && grep -Fq '"OMP_NUM_THREADS"' "${ROOT_DIR}/.venv/share/jupyter/kernels/octave-local-rsb/kernel.json"; then
+  needs_bootstrap=1
+fi
+
+octave_prefix="$(find "${ROOT_DIR}/.octave_all/install" -maxdepth 1 -mindepth 1 -type d -name 'octave-*' 2>/dev/null | sort | head -n 1)"
+if [[ -x "${octave_prefix}/bin/octave" ]]; then
+  if ! (
+    cd "${ROOT_DIR}" && \
+    bash -lc 'source .octave_all/env.sh && octave --quiet --eval "assert (exist (\"delaunay\", \"file\") == 2);"' \
+  ) >/dev/null 2>&1; then
+    needs_bootstrap=1
+  fi
+fi
+
 for rel_path in "${required_paths[@]}"; do
   if [[ ! -e "${ROOT_DIR}/${rel_path}" ]]; then
     needs_bootstrap=1

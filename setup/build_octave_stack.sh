@@ -31,6 +31,16 @@ prepare_sources() {
     "https://sourceforge.net/projects/octave/files/Octave%20Forge%20Packages/Individual%20Package%20Releases/sparsersb-${SPARSERSB_VERSION}.tar.gz/download" \
     "https://downloads.sourceforge.net/project/librsb/sparsersb/sparsersb-${SPARSERSB_VERSION}.tar.gz" \
     "https://sourceforge.net/projects/librsb/files/sparsersb/sparsersb-${SPARSERSB_VERSION}.tar.gz/download"
+
+  download_if_missing "${MATGEOM_TARBALL}" \
+    "https://packages.octave.org/download/matgeom-${MATGEOM_VERSION}.tar.gz" \
+    "https://downloads.sourceforge.net/project/octave/Octave%20Forge%20Packages/Individual%20Package%20Releases/matgeom-${MATGEOM_VERSION}.tar.gz" \
+    "https://sourceforge.net/projects/octave/files/Octave%20Forge%20Packages/Individual%20Package%20Releases/matgeom-${MATGEOM_VERSION}.tar.gz/download"
+
+  download_if_missing "${GEOMETRY_TARBALL}" \
+    "https://packages.octave.org/download/geometry-${GEOMETRY_VERSION}.tar.gz" \
+    "https://downloads.sourceforge.net/project/octave/Octave%20Forge%20Packages/Individual%20Package%20Releases/geometry-${GEOMETRY_VERSION}.tar.gz" \
+    "https://sourceforge.net/projects/octave/files/Octave%20Forge%20Packages/Individual%20Package%20Releases/geometry-${GEOMETRY_VERSION}.tar.gz/download"
 }
 
 patch_librsb_for_modern_gcc() {
@@ -176,7 +186,7 @@ build_librsb() {
   popd >/dev/null
 }
 
-build_and_install_sparsersb() {
+install_octave_packages() {
   local pkg_prefix="${OCTAVE_PREFIX}/share/octave/packages"
   local pkg_archprefix="${OCTAVE_PREFIX}/lib/octave/packages"
   local pkg_list="${OCTAVE_PREFIX}/share/octave/octave_packages"
@@ -185,8 +195,11 @@ build_and_install_sparsersb() {
     if export_runtime_env && "${OCTAVE_BIN}" --quiet --eval "\
         pkg('local_list','${pkg_list}'); \
         pkg('prefix','${pkg_prefix}','${pkg_archprefix}'); \
-        pkg load sparsersb; disp('sparsersb-present');" >/dev/null 2>&1; then
-      log "Skipping sparsersb install (package already loadable from local prefix)"
+        pkg load sparsersb; \
+        pkg load geometry; \
+        assert (exist ('delaunay', 'file') == 2); \
+        disp('octave-packages-present');" >/dev/null 2>&1; then
+      log "Skipping Octave package install (sparsersb + geometry already loadable from local prefix)"
       return 0
     fi
   fi
@@ -198,7 +211,7 @@ build_and_install_sparsersb() {
   log "Creating patched sparsersb source archive"
   tar -czf "${SPARSERSB_PATCHED_TARBALL}" -C "${BUILD_DIR}" "sparsersb-${SPARSERSB_VERSION}"
 
-  log "Installing sparsersb into local Octave prefix (not user home)"
+  log "Installing Octave Forge packages into local Octave prefix (not user home)"
   export_runtime_env
   export SPARSERSB_CXX11="-std=gnu++17"
 
@@ -210,9 +223,13 @@ build_and_install_sparsersb() {
     pkg ('prefix', '${pkg_prefix}', '${pkg_archprefix}'); \
     pkg ('local_list', '${pkg_list}'); \
     pkg install -verbose '${SPARSERSB_PATCHED_TARBALL}'; \
+    pkg install -verbose '${MATGEOM_TARBALL}'; \
+    pkg install -verbose '${GEOMETRY_TARBALL}'; \
     pkg load sparsersb; \
+    pkg load geometry; \
     A = sparsersb([1;2],[1;2],[1;1],2,2); \
-    disp(full(A));"
+    disp(full(A)); \
+    assert (exist ('delaunay', 'file') == 2);"
 }
 
 write_runtime_wrappers() {
@@ -242,7 +259,37 @@ export LIBRSB_PREFIX="${LIBRSB_PREFIX}"
 export OCTAVE_BIN="${OCTAVE_BIN}"
 export PATH="${OCTAVE_PREFIX}/bin:${LIBRSB_PREFIX}/bin:\${PATH}"
 export LD_LIBRARY_PATH="${LIBRSB_PREFIX}/lib:${OPENBLAS_PREFIX}/lib:\${LD_LIBRARY_PATH:-}"
-export OMP_NUM_THREADS="\${OMP_NUM_THREADS:-16}"
+if [[ -z "\${OMP_NUM_THREADS:-}" ]]; then
+  _slope_threads=""
+  _slope_quota=""
+  _slope_period=""
+  _slope_quota_threads=""
+  if command -v getconf >/dev/null 2>&1; then
+    _slope_threads="\$(getconf _NPROCESSORS_ONLN 2>/dev/null || true)"
+  fi
+  if [[ -z "\${_slope_threads:-}" ]] && command -v nproc >/dev/null 2>&1; then
+    _slope_threads="\$(nproc 2>/dev/null || true)"
+  fi
+  if [[ -r /sys/fs/cgroup/cpu.max ]]; then
+    read -r _slope_quota _slope_period < /sys/fs/cgroup/cpu.max || true
+    if [[ "\${_slope_quota:-}" =~ ^[0-9]+\$ && "\${_slope_period:-}" =~ ^[1-9][0-9]*\$ ]]; then
+      _slope_quota_threads="\$(( (_slope_quota + _slope_period - 1) / _slope_period ))"
+    fi
+  elif [[ -r /sys/fs/cgroup/cpu/cpu.cfs_quota_us && -r /sys/fs/cgroup/cpu/cpu.cfs_period_us ]]; then
+    _slope_quota="\$(cat /sys/fs/cgroup/cpu/cpu.cfs_quota_us 2>/dev/null || true)"
+    _slope_period="\$(cat /sys/fs/cgroup/cpu/cpu.cfs_period_us 2>/dev/null || true)"
+    if [[ "\${_slope_quota:-}" =~ ^[0-9]+\$ && "\${_slope_period:-}" =~ ^[1-9][0-9]*\$ && "\${_slope_quota}" -gt 0 ]]; then
+      _slope_quota_threads="\$(( (_slope_quota + _slope_period - 1) / _slope_period ))"
+    fi
+  fi
+  if [[ "\${_slope_threads:-}" =~ ^[1-9][0-9]*\$ && "\${_slope_quota_threads:-}" =~ ^[1-9][0-9]*\$ && "\${_slope_quota_threads}" -lt "\${_slope_threads}" ]]; then
+    _slope_threads="\${_slope_quota_threads}"
+  elif [[ ! "\${_slope_threads:-}" =~ ^[1-9][0-9]*\$ && "\${_slope_quota_threads:-}" =~ ^[1-9][0-9]*\$ ]]; then
+    _slope_threads="\${_slope_quota_threads}"
+  fi
+  export OMP_NUM_THREADS="\${_slope_threads:-1}"
+  unset _slope_threads _slope_quota _slope_period _slope_quota_threads
+fi
 EOF
   chmod +x "${RUNTIME_ENV}"
 
@@ -250,14 +297,76 @@ EOF
 #!/usr/bin/env bash
 set -euo pipefail
 export LD_LIBRARY_PATH="${LIBRSB_PREFIX}/lib:${OPENBLAS_PREFIX}/lib:\${LD_LIBRARY_PATH:-}"
+if [[ -z "\${OMP_NUM_THREADS:-}" ]]; then
+  _slope_threads=""
+  _slope_quota=""
+  _slope_period=""
+  _slope_quota_threads=""
+  if command -v getconf >/dev/null 2>&1; then
+    _slope_threads="\$(getconf _NPROCESSORS_ONLN 2>/dev/null || true)"
+  fi
+  if [[ -z "\${_slope_threads:-}" ]] && command -v nproc >/dev/null 2>&1; then
+    _slope_threads="\$(nproc 2>/dev/null || true)"
+  fi
+  if [[ -r /sys/fs/cgroup/cpu.max ]]; then
+    read -r _slope_quota _slope_period < /sys/fs/cgroup/cpu.max || true
+    if [[ "\${_slope_quota:-}" =~ ^[0-9]+\$ && "\${_slope_period:-}" =~ ^[1-9][0-9]*\$ ]]; then
+      _slope_quota_threads="\$(( (_slope_quota + _slope_period - 1) / _slope_period ))"
+    fi
+  elif [[ -r /sys/fs/cgroup/cpu/cpu.cfs_quota_us && -r /sys/fs/cgroup/cpu/cpu.cfs_period_us ]]; then
+    _slope_quota="\$(cat /sys/fs/cgroup/cpu/cpu.cfs_quota_us 2>/dev/null || true)"
+    _slope_period="\$(cat /sys/fs/cgroup/cpu/cpu.cfs_period_us 2>/dev/null || true)"
+    if [[ "\${_slope_quota:-}" =~ ^[0-9]+\$ && "\${_slope_period:-}" =~ ^[1-9][0-9]*\$ && "\${_slope_quota}" -gt 0 ]]; then
+      _slope_quota_threads="\$(( (_slope_quota + _slope_period - 1) / _slope_period ))"
+    fi
+  fi
+  if [[ "\${_slope_threads:-}" =~ ^[1-9][0-9]*\$ && "\${_slope_quota_threads:-}" =~ ^[1-9][0-9]*\$ && "\${_slope_quota_threads}" -lt "\${_slope_threads}" ]]; then
+    _slope_threads="\${_slope_quota_threads}"
+  elif [[ ! "\${_slope_threads:-}" =~ ^[1-9][0-9]*\$ && "\${_slope_quota_threads:-}" =~ ^[1-9][0-9]*\$ ]]; then
+    _slope_threads="\${_slope_quota_threads}"
+  fi
+  export OMP_NUM_THREADS="\${_slope_threads:-1}"
+  unset _slope_threads _slope_quota _slope_period _slope_quota_threads
+fi
 exec "${OCTAVE_BIN}" --no-gui "\$@"
 EOF
   chmod +x "${LOCAL_WRAPPER}"
 
-  cat > "${JUPYTER_WRAPPER}" <<EOF
+cat > "${JUPYTER_WRAPPER}" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 export LD_LIBRARY_PATH="${LIBRSB_PREFIX}/lib:${OPENBLAS_PREFIX}/lib:\${LD_LIBRARY_PATH:-}"
+if [[ -z "\${OMP_NUM_THREADS:-}" ]]; then
+  _slope_threads=""
+  _slope_quota=""
+  _slope_period=""
+  _slope_quota_threads=""
+  if command -v getconf >/dev/null 2>&1; then
+    _slope_threads="\$(getconf _NPROCESSORS_ONLN 2>/dev/null || true)"
+  fi
+  if [[ -z "\${_slope_threads:-}" ]] && command -v nproc >/dev/null 2>&1; then
+    _slope_threads="\$(nproc 2>/dev/null || true)"
+  fi
+  if [[ -r /sys/fs/cgroup/cpu.max ]]; then
+    read -r _slope_quota _slope_period < /sys/fs/cgroup/cpu.max || true
+    if [[ "\${_slope_quota:-}" =~ ^[0-9]+\$ && "\${_slope_period:-}" =~ ^[1-9][0-9]*\$ ]]; then
+      _slope_quota_threads="\$(( (_slope_quota + _slope_period - 1) / _slope_period ))"
+    fi
+  elif [[ -r /sys/fs/cgroup/cpu/cpu.cfs_quota_us && -r /sys/fs/cgroup/cpu/cpu.cfs_period_us ]]; then
+    _slope_quota="\$(cat /sys/fs/cgroup/cpu/cpu.cfs_quota_us 2>/dev/null || true)"
+    _slope_period="\$(cat /sys/fs/cgroup/cpu/cpu.cfs_period_us 2>/dev/null || true)"
+    if [[ "\${_slope_quota:-}" =~ ^[0-9]+\$ && "\${_slope_period:-}" =~ ^[1-9][0-9]*\$ && "\${_slope_quota}" -gt 0 ]]; then
+      _slope_quota_threads="\$(( (_slope_quota + _slope_period - 1) / _slope_period ))"
+    fi
+  fi
+  if [[ "\${_slope_threads:-}" =~ ^[1-9][0-9]*\$ && "\${_slope_quota_threads:-}" =~ ^[1-9][0-9]*\$ && "\${_slope_quota_threads}" -lt "\${_slope_threads}" ]]; then
+    _slope_threads="\${_slope_quota_threads}"
+  elif [[ ! "\${_slope_threads:-}" =~ ^[1-9][0-9]*\$ && "\${_slope_quota_threads:-}" =~ ^[1-9][0-9]*\$ ]]; then
+    _slope_threads="\${_slope_quota_threads}"
+  fi
+  export OMP_NUM_THREADS="\${_slope_threads:-1}"
+  unset _slope_threads _slope_quota _slope_period _slope_quota_threads
+fi
 
 if [[ -z "\${XDG_RUNTIME_DIR:-}" ]]; then
   export XDG_RUNTIME_DIR="/tmp/octave-runtime-\$(id -u)"
@@ -280,7 +389,10 @@ if [[ "\${BASH_SOURCE[0]}" == "\${0}" ]]; then
   exit 1
 fi
 
-source "${RUNTIME_ENV}"
+_slope_activate_script_dir="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
+_slope_activate_root_dir="\$(cd "\${_slope_activate_script_dir}/.." && pwd)"
+source "\${_slope_activate_root_dir}/.octave_all/env.sh"
+unset _slope_activate_script_dir _slope_activate_root_dir
 echo "Activated optimized local Octave:"
 echo "  OCTAVE_BIN=\${OCTAVE_BIN}"
 echo "  OMP_NUM_THREADS=\${OMP_NUM_THREADS}"
@@ -302,7 +414,7 @@ main() {
   build_openblas
   build_octave
   build_librsb
-  build_and_install_sparsersb
+  install_octave_packages
   write_runtime_wrappers
 
   export_runtime_env

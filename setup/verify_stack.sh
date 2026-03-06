@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=common.sh
 source "${SCRIPT_DIR}/common.sh"
 
-THREADS="${THREADS:-16}"
+THREADS="${THREADS:-${DEFAULT_OMP_THREADS}}"
 PROFILE="${PROFILE:-medium}"
 REPEATS="${REPEATS:-5}"
 WARMUP="${WARMUP:-2}"

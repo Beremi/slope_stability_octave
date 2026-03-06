@@ -7,7 +7,6 @@ source "${SCRIPT_DIR}/common.sh"
 
 KERNEL_NAME="${KERNEL_NAME:-octave-local-rsb}"
 KERNEL_DISPLAY_NAME="${KERNEL_DISPLAY_NAME:-Octave (local-rsb)}"
-DEFAULT_THREADS="${DEFAULT_THREADS:-16}"
 
 require_cmd python3
 
@@ -38,7 +37,6 @@ cat > "${KERNEL_DIR}/kernel.json" <<EOF
   "language": "octave",
   "env": {
     "OCTAVE_EXECUTABLE": "${JUPYTER_WRAPPER}",
-    "OMP_NUM_THREADS": "${DEFAULT_THREADS}",
     "LD_LIBRARY_PATH": "${LIBRSB_PREFIX}/lib:${OPENBLAS_PREFIX}/lib"
   }
 }

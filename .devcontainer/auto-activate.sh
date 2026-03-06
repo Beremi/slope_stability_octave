@@ -45,7 +45,37 @@ if [[ -n "${openblas_prefix}" && -n "${octave_prefix}" && -n "${librsb_prefix}" 
     export OCTAVE_BIN="${octave_prefix}/bin/octave"
     export PATH="${octave_prefix}/bin:${librsb_prefix}/bin:${PATH}"
     export LD_LIBRARY_PATH="${octave_lib_path}:${LD_LIBRARY_PATH:-}"
-    export OMP_NUM_THREADS="${OMP_NUM_THREADS:-16}"
+    if [[ -z "${OMP_NUM_THREADS:-}" ]]; then
+      _slope_threads=""
+      _slope_quota=""
+      _slope_period=""
+      _slope_quota_threads=""
+      if command -v getconf >/dev/null 2>&1; then
+        _slope_threads="$(getconf _NPROCESSORS_ONLN 2>/dev/null || true)"
+      fi
+      if [[ -z "${_slope_threads:-}" ]] && command -v nproc >/dev/null 2>&1; then
+        _slope_threads="$(nproc 2>/dev/null || true)"
+      fi
+      if [[ -r /sys/fs/cgroup/cpu.max ]]; then
+        read -r _slope_quota _slope_period < /sys/fs/cgroup/cpu.max || true
+        if [[ "${_slope_quota:-}" =~ ^[0-9]+$ && "${_slope_period:-}" =~ ^[1-9][0-9]*$ ]]; then
+          _slope_quota_threads="$(( (_slope_quota + _slope_period - 1) / _slope_period ))"
+        fi
+      elif [[ -r /sys/fs/cgroup/cpu/cpu.cfs_quota_us && -r /sys/fs/cgroup/cpu/cpu.cfs_period_us ]]; then
+        _slope_quota="$(cat /sys/fs/cgroup/cpu/cpu.cfs_quota_us 2>/dev/null || true)"
+        _slope_period="$(cat /sys/fs/cgroup/cpu/cpu.cfs_period_us 2>/dev/null || true)"
+        if [[ "${_slope_quota:-}" =~ ^[0-9]+$ && "${_slope_period:-}" =~ ^[1-9][0-9]*$ && "${_slope_quota}" -gt 0 ]]; then
+          _slope_quota_threads="$(( (_slope_quota + _slope_period - 1) / _slope_period ))"
+        fi
+      fi
+      if [[ "${_slope_threads:-}" =~ ^[1-9][0-9]*$ && "${_slope_quota_threads:-}" =~ ^[1-9][0-9]*$ && "${_slope_quota_threads}" -lt "${_slope_threads}" ]]; then
+        _slope_threads="${_slope_quota_threads}"
+      elif [[ ! "${_slope_threads:-}" =~ ^[1-9][0-9]*$ && "${_slope_quota_threads:-}" =~ ^[1-9][0-9]*$ ]]; then
+        _slope_threads="${_slope_quota_threads}"
+      fi
+      export OMP_NUM_THREADS="${_slope_threads:-1}"
+      unset _slope_threads _slope_quota _slope_period _slope_quota_threads
+    fi
     activated=1
   fi
 fi

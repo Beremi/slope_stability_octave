@@ -15,12 +15,16 @@ OPENBLAS_TARGET="${OPENBLAS_TARGET:-ZEN}"
 OCTAVE_VERSION="${OCTAVE_VERSION:-11.1.0}"
 LIBRSB_VERSION="${LIBRSB_VERSION:-1.3.0.2}"
 SPARSERSB_VERSION="${SPARSERSB_VERSION:-1.0.9}"
+MATGEOM_VERSION="${MATGEOM_VERSION:-1.2.1.octave}"
+GEOMETRY_VERSION="${GEOMETRY_VERSION:-4.1.0}"
 
 OPENBLAS_TARBALL="${SRC_DIR}/OpenBLAS-${OPENBLAS_VERSION}.tar.gz"
 OCTAVE_TARBALL="${SRC_DIR}/octave-${OCTAVE_VERSION}.tar.xz"
 LIBRSB_TARBALL="${SRC_DIR}/librsb-${LIBRSB_VERSION}.tar.gz"
 SPARSERSB_TARBALL="${SRC_DIR}/sparsersb-${SPARSERSB_VERSION}.tar.gz"
 SPARSERSB_PATCHED_TARBALL="${SRC_DIR}/sparsersb-${SPARSERSB_VERSION}-oct11-auto.tar.gz"
+MATGEOM_TARBALL="${SRC_DIR}/matgeom-${MATGEOM_VERSION}.tar.gz"
+GEOMETRY_TARBALL="${SRC_DIR}/geometry-${GEOMETRY_VERSION}.tar.gz"
 
 OPENBLAS_PREFIX="${INSTALL_DIR}/openblas-${OPENBLAS_VERSION}-zen"
 OCTAVE_PREFIX="${INSTALL_DIR}/octave-${OCTAVE_VERSION}-zen"
@@ -37,13 +41,49 @@ HYPRE_SRC_DIR="${HYPRE_SRC_DIR:-${SRC_DIR}/hypre}"
 HYPRE_BUILD_DIR="${HYPRE_BUILD_DIR:-${BUILD_DIR}/hypre-openmp}"
 HYPRE_INSTALL_DIR="${HYPRE_INSTALL_DIR:-${INSTALL_DIR}/hypre-openmp}"
 
-if command -v getconf >/dev/null 2>&1; then
-  NPROC_DEFAULT="$(getconf _NPROCESSORS_ONLN 2>/dev/null || true)"
-fi
-if [[ -z "${NPROC_DEFAULT:-}" ]] && command -v nproc >/dev/null 2>&1; then
-  NPROC_DEFAULT="$(nproc)"
-fi
-NPROC="${NPROC:-${NPROC_DEFAULT:-4}}"
+detect_online_cpus() {
+  local detected=""
+  local quota=""
+  local period=""
+  local quota_count=""
+
+  if command -v getconf >/dev/null 2>&1; then
+    detected="$(getconf _NPROCESSORS_ONLN 2>/dev/null || true)"
+  fi
+
+  if [[ -z "${detected}" ]] && command -v nproc >/dev/null 2>&1; then
+    detected="$(nproc 2>/dev/null || true)"
+  fi
+
+  if [[ -r /sys/fs/cgroup/cpu.max ]]; then
+    read -r quota period < /sys/fs/cgroup/cpu.max || true
+    if [[ "${quota}" =~ ^[0-9]+$ && "${period}" =~ ^[1-9][0-9]*$ ]]; then
+      quota_count="$(( (quota + period - 1) / period ))"
+    fi
+  elif [[ -r /sys/fs/cgroup/cpu/cpu.cfs_quota_us && -r /sys/fs/cgroup/cpu/cpu.cfs_period_us ]]; then
+    quota="$(cat /sys/fs/cgroup/cpu/cpu.cfs_quota_us 2>/dev/null || true)"
+    period="$(cat /sys/fs/cgroup/cpu/cpu.cfs_period_us 2>/dev/null || true)"
+    if [[ "${quota}" =~ ^[0-9]+$ && "${period}" =~ ^[1-9][0-9]*$ && "${quota}" -gt 0 ]]; then
+      quota_count="$(( (quota + period - 1) / period ))"
+    fi
+  fi
+
+  if [[ "${detected}" =~ ^[1-9][0-9]*$ && "${quota_count}" =~ ^[1-9][0-9]*$ && "${quota_count}" -lt "${detected}" ]]; then
+    detected="${quota_count}"
+  elif [[ ! "${detected}" =~ ^[1-9][0-9]*$ && "${quota_count}" =~ ^[1-9][0-9]*$ ]]; then
+    detected="${quota_count}"
+  fi
+
+  if [[ ! "${detected}" =~ ^[1-9][0-9]*$ ]]; then
+    detected="1"
+  fi
+
+  printf '%s\n' "${detected}"
+}
+
+NPROC_DEFAULT="$(detect_online_cpus)"
+NPROC="${NPROC:-${NPROC_DEFAULT}}"
+DEFAULT_OMP_THREADS="${DEFAULT_OMP_THREADS:-${NPROC_DEFAULT}}"
 
 log() {
   printf '[%s] %s\n' "$(date '+%H:%M:%S')" "$*"

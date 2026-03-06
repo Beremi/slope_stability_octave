@@ -82,7 +82,7 @@ cd "${SCRIPT_DIR}"
 
 # --- Step 6: Verify (optional) ----------------------------------------------
 if [[ "${RUN_VERIFY}" == "1" ]]; then
-  THREADS="${THREADS:-16}" "${SETUP_DIR}/verify_stack.sh"
+  "${SETUP_DIR}/verify_stack.sh"
 fi
 
 echo ""
@@ -96,4 +96,3 @@ echo " Then run demos from slope_stability/:"
 echo "   cd slope_stability"
 echo "   octave-cli slope_stability_2D_homo_SSR.m"
 echo "========================================"
-
