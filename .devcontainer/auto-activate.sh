@@ -12,11 +12,18 @@ repo_root="${SLOPE_STABILITY_REPO:-/workspaces/slope_stability}"
 activated=0
 
 install_root="${repo_root}/.octave_all/install"
-openblas_prefix="$(find "${install_root}" -maxdepth 1 -mindepth 1 -type d -name 'openblas-*' | sort | head -n 1)"
-octave_prefix="$(find "${install_root}" -maxdepth 1 -mindepth 1 -type d -name 'octave-*' | sort | head -n 1)"
-librsb_prefix="$(find "${install_root}" -maxdepth 1 -mindepth 1 -type d -name 'librsb-*' | sort | head -n 1)"
+openblas_prefix=""
+octave_prefix=""
+librsb_prefix=""
 octave_libexec_dir=""
-if [[ -n "${octave_prefix}" ]]; then
+
+if [[ -d "${install_root}" ]]; then
+  openblas_prefix="$(find "${install_root}" -maxdepth 1 -mindepth 1 -type d -name 'openblas-*' | sort | head -n 1)"
+  octave_prefix="$(find "${install_root}" -maxdepth 1 -mindepth 1 -type d -name 'octave-*' | sort | head -n 1)"
+  librsb_prefix="$(find "${install_root}" -maxdepth 1 -mindepth 1 -type d -name 'librsb-*' | sort | head -n 1)"
+fi
+
+if [[ -n "${octave_prefix}" && -d "${octave_prefix}/lib/octave" ]]; then
   octave_libexec_dir="$(find "${octave_prefix}/lib/octave" -maxdepth 1 -mindepth 1 -type d | sort | head -n 1)"
 fi
 
