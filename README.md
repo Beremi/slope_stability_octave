@@ -250,8 +250,10 @@ A repo-level [`Dockerfile`](Dockerfile) and [`.devcontainer/devcontainer.json`](
 - The devcontainer uses the actual repo basename under `/workspaces/`, so it works in Codespaces even when the repository is not named exactly `slope_stability`.
 - Codespaces prebuilds run `.devcontainer/post-create.sh` via `updateContentCommand`, so the heavy local stack is built into the prebuild workspace snapshot and is ready when a codespace starts.
 - The devcontainer declares a minimum **16-core / 32 GB / 64 GB** machine profile for Codespaces.
+- VS Code inside the devcontainer installs the Jupyter, Jupyter Renderers, Octave, and MATLAB language extensions so notebooks and `.m` files are ready without extra editor setup.
 - Each new interactive `bash` session auto-exports the local Octave runtime and the repo `.venv` when those directories exist.
 - The container image includes `gnuplot-nox` for headless shell plotting, and the Jupyter kernel uses an Xvfb-backed wrapper so notebooks can keep preferring the `qt` graphics toolkit even without a real desktop display.
+- The image also includes a TeX runtime with `dvipng`, `dvisvgm`, and the `standalone` LaTeX class so Octave plots using `Interpreter='latex'` render correctly in notebooks and exported figures.
 - If the repo already contains `.octave_all/` or `.venv/` from a different absolute path, the devcontainer bootstrap detects that and rebuilds them once so the wrapper scripts and Jupyter kernel point at the current `/workspaces/<repo-name>` mount.
 
 Plain Docker usage:

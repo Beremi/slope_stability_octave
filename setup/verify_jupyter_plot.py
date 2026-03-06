@@ -11,7 +11,7 @@ import nbformat
 from nbclient import NotebookClient
 
 
-TEST_CELL = """%plot -f png -r 120
+BASE_TEST_CELL = """%plot -f png -r 120
 pkg load sparsersb;
 try
   graphics_toolkit('qt');
@@ -23,8 +23,14 @@ set(0, 'defaultfigurevisible', 'off');
 disp(['toolkit=', graphics_toolkit()]);
 figure;
 plot(1:10);
-title('devcontainer plot test');
-drawnow;
+"""
+
+LATEX_LABEL_CELL = """xlabel('Control variable - $\\omega$', 'interpreter', 'latex');
+ylabel('strength reduction factor - $\\lambda$', 'interpreter', 'latex');
+title('devcontainer plot test', 'interpreter', 'latex');
+"""
+
+PLAIN_LABEL_CELL = """title('devcontainer plot test');
 """
 
 
@@ -67,10 +73,22 @@ def main() -> int:
         default=".",
         help="Notebook execution directory (default: current directory)",
     )
+    parser.add_argument(
+        "--latex-labels",
+        action="store_true",
+        help="Exercise Octave's LaTeX text renderer in the notebook plot.",
+    )
     args = parser.parse_args()
 
+    test_cell = BASE_TEST_CELL
+    if args.latex_labels:
+        test_cell += LATEX_LABEL_CELL
+    else:
+        test_cell += PLAIN_LABEL_CELL
+    test_cell += "drawnow;\n"
+
     nb = nbformat.v4.new_notebook()
-    nb.cells = [nbformat.v4.new_code_cell(TEST_CELL)]
+    nb.cells = [nbformat.v4.new_code_cell(test_cell)]
 
     client = NotebookClient(
         nb,

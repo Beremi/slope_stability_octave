@@ -14,10 +14,13 @@ RUN apt-get update \
         ca-certificates \
         cmake \
         curl \
+        dvipng \
+        dvisvgm \
         flex \
         gawk \
         gfortran \
         git \
+        ghostscript \
         gnuplot-nox \
         libarpack2-dev \
         libbz2-dev \
@@ -54,6 +57,10 @@ RUN apt-get update \
         qt6-tools-dev-tools \
         sed \
         tar \
+        texlive-fonts-recommended \
+        texlive-latex-base \
+        texlive-latex-extra \
+        texlive-latex-recommended \
         wget \
         xauth \
         xvfb \

@@ -20,8 +20,11 @@
     },
     "vscode": {
       "extensions": [
+        "Kronuz.octave",
+        "MathWorks.language-matlab",
         "ms-python.python",
-        "ms-toolsai.jupyter"
+        "ms-toolsai.jupyter",
+        "ms-toolsai.jupyter-renderers"
       ],
       "settings": {
         "python.defaultInterpreterPath": "/workspaces/${localWorkspaceFolderBasename}/.venv/bin/python",
