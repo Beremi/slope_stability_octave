@@ -26,8 +26,10 @@ sudo apt-get install -y \
   libreadline-dev libncurses-dev libpcre2-dev libcurl4-openssl-dev \
   libz-dev libbz2-dev liblzma-dev libfftw3-dev libarpack2-dev \
   libhdf5-dev libgraphicsmagick++1-dev libgl2ps-dev \
+  libfontconfig-dev libglu1-mesa-dev \
   libsndfile1-dev libportaudio2 \
-  qt6-base-dev libqt6opengl6-dev libqt6svg6-dev libqscintilla2-qt6-dev \
+  qt6-base-dev qt6-tools-dev qt6-tools-dev-tools qt6-5compat-dev \
+  libqt6opengl6-dev libqt6svg6-dev libqscintilla2-qt6-dev \
   libgl-dev libegl-dev mesa-common-dev \
   python3 python3-venv python3-pip
 ```

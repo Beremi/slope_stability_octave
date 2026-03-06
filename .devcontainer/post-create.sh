@@ -6,6 +6,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 required_paths=(
   ".octave_all/env.sh"
   ".octave_all/bin/octave-rsb"
+  ".octave_all/bin/octave-rsb-jupyter"
   ".venv/bin/python"
   ".venv/bin/activate"
   "setup/activate_optimized_octave.sh"
@@ -22,6 +23,15 @@ relocatable_path_matches() {
   [[ -f "${file_path}" ]] && grep -Fq "${expected}" "${file_path}"
 }
 
+find_octave_config_header() {
+  local build_root="${ROOT_DIR}/.octave_all/build"
+  if [[ ! -d "${build_root}" ]]; then
+    return 0
+  fi
+
+  find "${build_root}" -path '*/octave-*-build/config.h' | sort | head -n 1
+}
+
 if [[ -e "${ROOT_DIR}/.octave_all/env.sh" ]] && ! relocatable_path_matches "${ROOT_DIR}/.octave_all/env.sh" "${ROOT_DIR}/.octave_all/install/"; then
   needs_clean=1
 fi
@@ -32,6 +42,15 @@ fi
 
 if [[ -e "${ROOT_DIR}/.venv/bin/activate" ]] && ! relocatable_path_matches "${ROOT_DIR}/.venv/bin/activate" "${ROOT_DIR}/.venv"; then
   needs_clean=1
+fi
+
+if [[ "${REQUIRE_QT_TOOLKIT:-0}" == "1" ]]; then
+  octave_config_h="$(find_octave_config_header)"
+  if [[ -z "${octave_config_h}" ]]; then
+    needs_clean=1
+  elif ! grep -q 'HAVE_QT 1' "${octave_config_h}" || ! grep -q 'HAVE_OPENGL 1' "${octave_config_h}"; then
+    needs_clean=1
+  fi
 fi
 
 needs_bootstrap=0

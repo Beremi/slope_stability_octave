@@ -207,6 +207,7 @@ A repo-level [`Dockerfile`](Dockerfile) and [`.devcontainer/devcontainer.json`](
 
 - In a Dev Container, first creation runs `./bootstrap_all.sh --no-clean --no-verify` from `.devcontainer/post-create.sh`, so the heavy local stack is built inside the mounted workspace instead of being hidden in the image layer.
 - Each new interactive `bash` session auto-exports the local Octave runtime and the repo `.venv` when those directories exist.
+- The container image includes `gnuplot-nox` for headless shell plotting, and the Jupyter kernel uses an Xvfb-backed wrapper so notebooks can keep preferring the `qt` graphics toolkit even without a real desktop display.
 - If the repo already contains `.octave_all/` or `.venv/` from a different absolute path, the devcontainer bootstrap detects that and rebuilds them once so the wrapper scripts and Jupyter kernel point at `/workspaces/slope_stability`.
 
 Plain Docker usage:

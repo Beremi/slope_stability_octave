@@ -138,6 +138,16 @@ build_octave() {
     fail "Octave configure did not find HDF5. Install libhdf5-dev (Debian/Ubuntu), hdf5 (Arch), or hdf5-devel (Fedora)."
   fi
 
+  if [[ "${REQUIRE_QT_TOOLKIT:-0}" == "1" ]]; then
+    if ! grep -q 'HAVE_QT 1' config.h 2>/dev/null; then
+      fail "Octave configure did not enable the Qt toolkit. On Ubuntu/Debian, install qt6-tools-dev qt6-tools-dev-tools qt6-5compat-dev libfontconfig-dev and libglu1-mesa-dev."
+    fi
+
+    if ! grep -q 'HAVE_OPENGL 1' config.h 2>/dev/null; then
+      fail "Octave configure did not enable OpenGL graphics. On Ubuntu/Debian, install libglu1-mesa-dev and libfontconfig-dev and rebuild."
+    fi
+  fi
+
   make -j"${NPROC}"
   make install
   popd >/dev/null
@@ -243,6 +253,25 @@ export LD_LIBRARY_PATH="${LIBRSB_PREFIX}/lib:${OPENBLAS_PREFIX}/lib:\${LD_LIBRAR
 exec "${OCTAVE_BIN}" --no-gui "\$@"
 EOF
   chmod +x "${LOCAL_WRAPPER}"
+
+  cat > "${JUPYTER_WRAPPER}" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+export LD_LIBRARY_PATH="${LIBRSB_PREFIX}/lib:${OPENBLAS_PREFIX}/lib:\${LD_LIBRARY_PATH:-}"
+
+if [[ -z "\${XDG_RUNTIME_DIR:-}" ]]; then
+  export XDG_RUNTIME_DIR="/tmp/octave-runtime-\$(id -u)"
+fi
+mkdir -p "\${XDG_RUNTIME_DIR}"
+chmod 700 "\${XDG_RUNTIME_DIR}" 2>/dev/null || true
+
+if command -v xvfb-run >/dev/null 2>&1 && [[ -z "\${DISPLAY:-}" ]]; then
+  exec xvfb-run -a -s "-screen 0 1600x1200x24" "${OCTAVE_BIN}" --no-gui "\$@"
+fi
+
+exec "${OCTAVE_BIN}" --no-gui "\$@"
+EOF
+  chmod +x "${JUPYTER_WRAPPER}"
 
   cat > "${ACTIVATE_SCRIPT}" <<EOF
 #!/usr/bin/env bash

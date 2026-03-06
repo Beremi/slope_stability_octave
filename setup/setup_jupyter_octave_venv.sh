@@ -11,8 +11,8 @@ DEFAULT_THREADS="${DEFAULT_THREADS:-16}"
 
 require_cmd python3
 
-if [[ ! -x "${LOCAL_WRAPPER}" ]]; then
-  fail "Missing local octave wrapper: ${LOCAL_WRAPPER}. Run build_octave_stack.sh first."
+if [[ ! -x "${JUPYTER_WRAPPER}" ]]; then
+  fail "Missing Jupyter octave wrapper: ${JUPYTER_WRAPPER}. Run build_octave_stack.sh first."
 fi
 
 log "Creating Python venv at ${JUPYTER_VENV}"
@@ -37,7 +37,7 @@ cat > "${KERNEL_DIR}/kernel.json" <<EOF
   "display_name": "${KERNEL_DISPLAY_NAME}",
   "language": "octave",
   "env": {
-    "OCTAVE_EXECUTABLE": "${LOCAL_WRAPPER}",
+    "OCTAVE_EXECUTABLE": "${JUPYTER_WRAPPER}",
     "OMP_NUM_THREADS": "${DEFAULT_THREADS}",
     "LD_LIBRARY_PATH": "${LIBRSB_PREFIX}/lib:${OPENBLAS_PREFIX}/lib"
   }
