@@ -8,6 +8,7 @@ source "${SCRIPT_DIR}/common.sh"
 COMMON_OPT_FLAGS="${COMMON_OPT_FLAGS:--O3 -march=native -mtune=native}"
 FORCE_REBUILD="${FORCE_REBUILD:-0}"
 FORCE_SPARSERSB_REINSTALL="${FORCE_SPARSERSB_REINSTALL:-0}"
+LIBRSB_MAKE_JOBS="${LIBRSB_MAKE_JOBS:-1}"
 
 prepare_sources() {
   ensure_dirs
@@ -153,13 +154,14 @@ build_librsb() {
   patch_librsb_for_modern_gcc "${src_unpack}/rsb_common.h"
 
   log "Building librsb ${LIBRSB_VERSION}"
+  log "Using ${LIBRSB_MAKE_JOBS} make job(s) for librsb to avoid Fortran module race conditions"
   pushd "${src_unpack}" >/dev/null
   CFLAGS="${COMMON_OPT_FLAGS}" \
   CXXFLAGS="${COMMON_OPT_FLAGS}" \
   FFLAGS="${COMMON_OPT_FLAGS}" \
   FCFLAGS="${COMMON_OPT_FLAGS}" \
   ./configure --prefix="${LIBRSB_PREFIX}" --enable-openmp
-  make -j"${NPROC}"
+  make -j"${LIBRSB_MAKE_JOBS}"
   make install
   popd >/dev/null
 }

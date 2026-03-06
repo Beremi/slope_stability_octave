@@ -33,3 +33,7 @@ benchmark_octave/benchmark_octave/
 
 # Generated activation script
 setup/activate_optimized_octave.sh
+slope_stability/+CONSTITUTIVE_PROBLEM/constitutive_problem_2D_SDS_mex.mex
+slope_stability/+CONSTITUTIVE_PROBLEM/constitutive_problem_2D_S_mex.mex
+slope_stability/+ASSEMBLY/assemble_K_tangent_vals_2D.mex
+slope_stability/+ASSEMBLY/assemble_K_tangent_vals_2D.mex
