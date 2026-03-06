@@ -67,7 +67,10 @@ if [[ -e "${ROOT_DIR}/.venv/share/jupyter/kernels/octave-local-rsb/kernel.json" 
   needs_bootstrap=1
 fi
 
-octave_prefix="$(find "${ROOT_DIR}/.octave_all/install" -maxdepth 1 -mindepth 1 -type d -name 'octave-*' 2>/dev/null | sort | head -n 1)"
+octave_prefix=""
+if [[ -d "${ROOT_DIR}/.octave_all/install" ]]; then
+  octave_prefix="$(find "${ROOT_DIR}/.octave_all/install" -maxdepth 1 -mindepth 1 -type d -name 'octave-*' | sort | head -n 1)"
+fi
 if [[ -x "${octave_prefix}/bin/octave" ]]; then
   if ! (
     cd "${ROOT_DIR}" && \
